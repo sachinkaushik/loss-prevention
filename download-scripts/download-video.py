@@ -19,26 +19,29 @@ def process_camera_videos(config_path, script_path):
         return
     with open(config_path, "r") as f:
         config = json.load(f)
-    for cam in config.get("lane_config", {}).get("cameras", []):
-        file_src = cam.get("fileSrc", "")
-        if "|" not in file_src:
-            continue
-        filename, url = [x.strip() for x in file_src.split("|", 1)]
-        width = str(cam.get("width", ""))
-        height = str(cam.get("height", ""))
-        fps = str(cam.get("fps", ""))
-        print(f"Processing: {filename} from {url}")
-        # Only pass width/height/fps if all are valid, or only fps if valid, else nothing
-        if width.isdigit() and height.isdigit() and fps.isdigit():
-            cmd = [script_path, filename, url, width, height, fps]
-        elif fps.isdigit():
-            cmd = [script_path, filename, url, '', '', fps]
-        else:
-            cmd = [script_path, filename, url]
-        try:
-            subprocess.run(cmd, check=True, cwd=sample_media_dir)
-        except subprocess.CalledProcessError as e:
-            print(f"Error running {script_path} for {filename}: {e}")
+    # Support new format: top-level keys are lane names, each with a cameras array
+    for lane_obj in config.values():
+        cameras = lane_obj.get("cameras", [])
+        for cam in cameras:
+            file_src = cam.get("fileSrc", "")
+            if "|" not in file_src:
+                continue
+            filename, url = [x.strip() for x in file_src.split("|", 1)]
+            width = str(cam.get("width", ""))
+            height = str(cam.get("height", ""))
+            fps = str(cam.get("fps", ""))
+            print(f"Processing: {filename} from {url}")
+            # Only pass width/height/fps if all are valid, or only fps if valid, else nothing
+            if width.isdigit() and height.isdigit() and fps.isdigit():
+                cmd = [script_path, filename, url, width, height, fps]
+            elif fps.isdigit():
+                cmd = [script_path, filename, url, '', '', fps]
+            else:
+                cmd = [script_path, filename, url]
+            try:
+                subprocess.run(cmd, check=True, cwd=sample_media_dir)
+            except subprocess.CalledProcessError as e:
+                print(f"Error running {script_path} for {filename}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='Download and format videos for each camera in camera_to_workload.json')

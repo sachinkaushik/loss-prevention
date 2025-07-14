@@ -113,13 +113,11 @@ class ConfigValidator:
         return 1
     
     def validate_camera_config(self, config_path: str) -> bool:
-        """Validate camera_to_workload.json configuration."""
+        """Validate camera_to_workload.json configuration (multi-lane support)."""
         print(f"Validating camera configuration: {config_path}")
-        
         if not Path(config_path).exists():
             self.add_error(f"Configuration file not found: {config_path}")
             return False
-        
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
@@ -129,40 +127,33 @@ class ConfigValidator:
         except Exception as e:
             self.add_error(f"Failed to read {config_path}: {e}")
             return False
-        
-        # Check for lane_config structure
-        if 'lane_config' not in config:
-            self.add_error("Missing 'lane_config' section in camera configuration")
+
+        # Multi-lane support: expect top-level keys as lanes
+        if not isinstance(config, dict) or not config:
+            self.add_error("Camera configuration must be a non-empty object with lane keys (lane1, lane2, ...)")
             return False
-        
-        lane_config = config['lane_config']
-        if not isinstance(lane_config, dict):
-            self.add_error("'lane_config' must be an object")
-            return False
-        
-        if 'cameras' not in lane_config:
-            self.add_error("Missing 'cameras' array in lane_config")
-            return False
-        
-        cameras = lane_config['cameras']
-        if not isinstance(cameras, list):
-            self.add_error("'cameras' must be an array")
-            return False
-        
-        if len(cameras) == 0:
-            self.add_error("'cameras' array cannot be empty")
-            return False
-        
+
         valid_count = 0
-        for i, camera in enumerate(cameras):
-            if self._validate_camera_config(camera, f"camera[{i}]"):
-                valid_count += 1
-        
+        for lane_name, lane_data in config.items():
+            if not isinstance(lane_data, dict):
+                self.add_error(f"Lane '{lane_name}' must be an object")
+                continue
+            cameras = lane_data.get('cameras')
+            if not isinstance(cameras, list):
+                self.add_error(f"Missing or invalid 'cameras' array in lane '{lane_name}'")
+                continue
+            if len(cameras) == 0:
+                self.add_error(f"'cameras' array in lane '{lane_name}' cannot be empty")
+                continue
+            for i, camera in enumerate(cameras):
+                if self._validate_camera_config(camera, f"{lane_name}.camera[{i}]"):
+                    valid_count += 1
+
         if valid_count == 0:
-            self.add_error("No valid camera configurations found")
+            self.add_error("No valid camera configurations found in any lane")
             return False
-        
-        print(f"SUCCESS: Found {valid_count} valid camera configurations")
+
+        print(f"SUCCESS: Found {valid_count} valid camera configurations across all lanes")
         return True
     
     def _validate_camera_config(self, camera: Dict[str, Any], context: str) -> bool:

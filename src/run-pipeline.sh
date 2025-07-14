@@ -5,54 +5,55 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# Get dynamic gst-launch command from Python script
 
-echo "############# Generating GStreamer pipeline command ##########"
+echo "############# Generating GStreamer pipeline commands for all lanes ##########"
 echo "################### RENDER_MODE #################"$RENDER_MODE 
-gst_cmd=$(python3 "$(dirname "$0")/gst-pipeline-generator.py")
-echo "#############  GStreamer pipeline command generated succussfully ##########"
 
-# Generate timestamp for log files
+# Get JSON output from Python script
+lane_json=$(python3 "$(dirname "$0")/gst-pipeline-generator.py")
+echo "#############  GStreamer pipeline commands generated successfully ##########"
+
 timestamp=$(date +"%Y%m%d_%H%M%S")
-
-# Create pipelines directory if it doesn't exist (use absolute path)
 pipelines_dir="/home/pipeline-server/pipelines"
 mkdir -p "$pipelines_dir"
 
-# Debug: Check if directory was created
 if [ -d "$pipelines_dir" ]; then
     echo "################# Pipelines directory exists: $pipelines_dir ###################"
 else
     echo "################# ERROR: Failed to create pipelines directory: $pipelines_dir ###################"
 fi
 
-# Create pipeline.sh file with the generated command
-pipeline_file="$pipelines_dir/pipeline.sh"
-echo "################# Creating pipeline file: $pipeline_file ###################"
-
-echo "#!/bin/bash" > "$pipeline_file"
-echo "# Generated GStreamer pipeline command" >> "$pipeline_file"
-echo "# Generated on: $(date)" >> "$pipeline_file"
-echo "" >> "$pipeline_file"
-echo "$gst_cmd" >> "$pipeline_file"
-
-# Make the pipeline file executable
-chmod +x "$pipeline_file"
-
-# Debug: Check if file was created
-if [ -f "$pipeline_file" ]; then
-    echo "################# Pipeline file created successfully: $pipeline_file ###################"
-    echo "################# File size: $(stat -c%s "$pipeline_file") bytes ###################"
-else
-    echo "################# ERROR: Failed to create pipeline file: $pipeline_file ###################"
+# Parse lane_json and create per-lane pipeline shell scripts
+# Requires 'jq' for JSON parsing
+if ! command -v jq &> /dev/null; then
+    echo "################# ERROR: 'jq' is required but not installed. Please install jq. ###################"
+    exit 1
 fi
 
-# Append logging pipeline to gst_cmd with proper line breaks
-gst_cmd=$(printf "%s \\\\\n\\\\\n%s" "$gst_cmd" "2>&1 | tee /home/pipeline-server/results/pipeline_${timestamp}.log | (stdbuf -oL sed -n -E 's/.*total=([0-9]+\.[0-9]+) fps.*/\1/p' > /home/pipeline-server/results/fps_${timestamp}.log)")
+lane_names=$(echo "$lane_json" | jq -r 'keys[]')
+for lane in $lane_names; do
+    lane_file="$pipelines_dir/pipeline_${lane}.sh"
+    echo "################# Creating pipeline file for lane: $lane -> $lane_file ###################"
+    echo "#!/bin/bash" > "$lane_file"
+    echo "# Generated GStreamer pipeline command for lane: $lane" >> "$lane_file"
+    echo "# Generated on: $(date)" >> "$lane_file"
+    echo "" >> "$lane_file"
+    gst_cmd=$(echo "$lane_json" | jq -r --arg lane "$lane" '.[$lane]')
+    # Write the gst_cmd and logging on the same line for correct execution
+    echo "$gst_cmd 2>&1 | tee /home/pipeline-server/results/pipeline_${lane}_${timestamp}.log | (stdbuf -oL sed -n -E 's/.*total=([0-9]+\\.[0-9]+) fps.*/\\1/p' > /home/pipeline-server/results/fps_${lane}_${timestamp}.log)" >> "$lane_file"
+    chmod +x "$lane_file"
+    if [ -f "$lane_file" ]; then
+        echo "################# Pipeline file created successfully: $lane_file ###################"
+        echo "################# File size: $(stat -c%s "$lane_file") bytes ###################"
+    else
+        echo "################# ERROR: Failed to create pipeline file: $lane_file ###################"
+    fi
+    echo "################# Running Pipeline for lane: $lane ###################"
+    echo "$gst_cmd"
+    bash "$lane_file" &
+done
 
-# Print and run the pipeline command
-echo "################# Running Pipeline ###################"
-echo "$gst_cmd"
-eval "$gst_cmd"
+wait
+echo "############# ALL GST PIPELINES COMPLETED SUCCESSFULLY #############"
 
-echo "############# GST COMMAND COMPLETED SUCCESSFULLY #############"
+sleep 10m

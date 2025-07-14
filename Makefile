@@ -77,7 +77,7 @@ benchmark: build-benchmark download-sample-videos download-models
 		cd performance-tools/benchmark-scripts && python3 benchmark.py --compose_file ../../src/docker-compose.yml --pipelines $(PIPELINE_COUNT) --results_dir $(RESULTS_DIR); \
 	fi
 
-run-lp: | update-submodules download-sample-videos
+run-lp: 
 	@echo downloading the models
 	$(MAKE) download-models
 	@echo Running loss prevention pipeline

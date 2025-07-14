@@ -105,7 +105,7 @@ def build_gst_element(cfg):
         raise ValueError(f"Unknown or unsupported GStreamer element type: {cfg['type']}")
     return elem, DECODE
 
-def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=0, model_instance_map=None, model_instance_counter=None, timestamp=None):
+def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=0, cam_idx=0, model_instance_map=None, model_instance_counter=None, timestamp=None):
     if model_instance_map is None:
         model_instance_map = {}
     if model_instance_counter is None:
@@ -177,13 +177,13 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
             if not rois and i == 0 and step["type"] in inference_types:
                 pipeline += " ! gvaattachroi"
             if step["type"] == "gvadetect":
-                model_instance_id = f"detect{branch_idx+1}_{idx+1}"
+                model_instance_id = f"detect_lane{branch_idx+1}_cam{cam_idx+1}_{idx+1}"
                 elem, _ = build_gst_element(step)
                 elem = elem.replace("gvadetect", f"gvadetect model-instance-id={model_instance_id} threshold=0.5")
                 pipeline += f" ! {elem} ! gvatrack ! queue"
                 last_added_queue = True
             elif step["type"] == "gvaclassify":
-                model_instance_id = f"classify{branch_idx+1}_{idx+1}"
+                model_instance_id = f"classify_lane{branch_idx+1}_cam{cam_idx+1}_{idx+1}"
                 elem, _ = build_gst_element(step)
                 elem = elem.replace("gvaclassify", f"gvaclassify model-instance-id={model_instance_id}")
                 pipeline += f" ! {elem} "
@@ -196,7 +196,8 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
             if i < len(steps) - 1:
                 if not (step["type"] == "gvadetect"):
                     pipeline += " ! queue"
-        tee_name = f"t{branch_idx+1}_{idx+1}"
+        # Make tee name unique per camera branch (branch_idx, idx)
+        tee_name = f"t{branch_idx+1}_{idx+1}_{camera.get('camera_id', cam_idx+1)}"
         results_dir = "/home/pipeline-server/results"
         out_file = f"{results_dir}/rs-{branch_idx+1}_{idx+1}_{timestamp}.jsonl"
         pipeline += f" ! gvametaconvert format=json ! tee name={tee_name} "
@@ -235,25 +236,37 @@ def main():
     # Ensure results directory exists at project root before running pipeline
     results_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
     os.makedirs(results_dir, exist_ok=True)
-    
+
     # Generate timestamp for all files
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     camera_config = load_json(CONFIG_CAMERA_TO_WORKLOAD)
     workload_map = load_json(CONFIG_WORKLOAD_TO_PIPELINE)["workload_pipeline_map"]
-    pipelines = []
     model_instance_map = {}
     model_instance_counter = [0]
-    for idx, cam in enumerate(camera_config["lane_config"]["cameras"]):
-        workloads = [w.lower() for w in cam["workloads"]]
-        norm_workload_map = {k.lower(): v for k, v in workload_map.items()}
-        cam_pipelines = build_dynamic_gstlaunch_command(cam, workloads, norm_workload_map, branch_idx=idx, model_instance_map=model_instance_map, model_instance_counter=model_instance_counter, timestamp=timestamp)
-        pipelines.extend([p.strip() for p in cam_pipelines])
-    # Print gst-launch-1.0 -e and all pipelines, each filesrc on a new line, with a backslash at the end except the last
-    print("gst-launch-1.0 -e \\")
-    for idx, p in enumerate(pipelines):
-        end = " \\" if idx < len(pipelines) - 1 else ""
-        print(f"  {p}{end}")
+    lane_idx = 0
+    lane_commands = {}
+    for lane_name, lane_data in camera_config.items():
+        cameras = lane_data.get("cameras", [])
+        branch_cmds = []
+        for cam_idx, cam in enumerate(cameras):
+            workloads = [w.lower() for w in cam["workloads"]]
+            norm_workload_map = {k.lower(): v for k, v in workload_map.items()}
+            cam_pipelines = build_dynamic_gstlaunch_command(cam, workloads, norm_workload_map, branch_idx=lane_idx, cam_idx=cam_idx, model_instance_map=model_instance_map, model_instance_counter=model_instance_counter, timestamp=timestamp)
+            # Each cam_pipelines is a list, but for multistream, we want each camera's pipeline as a branch
+            for p in cam_pipelines:
+                # Ensure each branch starts with its own filesrc
+                branch_cmds.append(p.strip().rstrip('!').rstrip())
+        lane_idx += 1
+        # For multiple cameras, join each branch with ' ! ' and format multiline with backslashes
+        if branch_cmds:
+            # Remove trailing ! from each branch before joining
+            cleaned_cmds = [b.rstrip('!').rstrip() for b in branch_cmds]
+            gst_cmd = "gst-launch-1.0 -e \\\n  " + " \\\n  ".join(cleaned_cmds)
+            lane_commands[lane_name] = gst_cmd
+    # Print as JSON for downstream consumption
+    import json
+    print(json.dumps(lane_commands, indent=2))
 
 if __name__ == "__main__":
     main()
