@@ -165,7 +165,7 @@ def quantize_model():
 def download_extra_files():
     downloaded_paths = {}
     for filename, url in EXTRA_FILES.items():
-        dest_path = INT8_DIR / filename
+        dest_path = BASE_DIR / filename
         if not dest_path.exists():
             urllib.request.urlretrieve(url, dest_path)
         downloaded_paths[filename] = dest_path.resolve()

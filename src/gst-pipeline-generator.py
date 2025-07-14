@@ -29,15 +29,11 @@ def download_model_if_missing(model_name, model_type=None, precision=None):
     if model_type == "gvadetect":
         precision_lower = precision.lower()
         return f"{MODELSERVER_MODELS_DIR}/object_detection/{model_name}/{precision}/{model_name}.xml"
-    elif model_type == "gvaclassify" and precision == "INT8":
-        base_path = f"{MODELSERVER_MODELS_DIR}/object_classification/{model_name}"
-        model_path = f"{base_path}/{precision}/{model_name}.xml"
-        label_path = f"{base_path}/{precision}/{model_name}.txt"
-        proc_path = f"{base_path}/{precision}/{model_name}.json"
-        return model_path, label_path, proc_path
     elif model_type == "gvaclassify":
         base_path = f"{MODELSERVER_MODELS_DIR}/object_classification/{model_name}"
-        model_path = f"{base_path}/{precision}/{model_name}.xml"       
+        model_path = f"{base_path}/{model_name}.xml"
+        label_path = f"{base_path}/{model_name}.txt"
+        proc_path = f"{base_path}/{model_name}.json"
         return model_path, label_path, proc_path
     else:
         # fallback
@@ -199,7 +195,9 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
         # Make tee name unique per camera branch (branch_idx, idx)
         tee_name = f"t{branch_idx+1}_{idx+1}_{camera.get('camera_id', cam_idx+1)}"
         results_dir = "/home/pipeline-server/results"
-        out_file = f"{results_dir}/rs-{branch_idx+1}_{idx+1}_{timestamp}.jsonl"
+        lane_name = camera.get('lane_name', f"lane{branch_idx+1}")
+        camera_id = camera.get('camera_id', f"cam{cam_idx+1}")
+        out_file = f"{results_dir}/rs-{lane_name}-{camera_id}-{timestamp}.jsonl"
         pipeline += f" ! gvametaconvert format=json ! tee name={tee_name} "
         pipeline += f"    {tee_name}. ! queue ! gvametapublish method=file file-path={out_file} ! gvafpscounter ! fakesink sync=false async=false "
         render_mode = os.environ.get("RENDER_MODE", "0")
@@ -217,11 +215,15 @@ def format_pipeline_multiline(pipeline):
     for idx, elem in enumerate(elems):
         is_first = idx == 0
         indent = '' if is_first else '  '
+        # Only add '! \' if not the last element
         if idx < len(elems) - 1:
-            line = f"{indent}{elem} ! \\"
+            line = f"{indent}{elem} ! \\" 
         else:
             line = f"{indent}{elem}"
         formatted.append(line)
+    # Remove any trailing '! \\' from the last line if present
+    if formatted and formatted[-1].endswith('! \\'):
+        formatted[-1] = formatted[-1][:-3].rstrip()
     return '\n'.join(formatted)
 
 def format_pipeline_branch(pipeline):
@@ -249,9 +251,11 @@ def main():
     for lane_name, lane_data in camera_config.items():
         cameras = lane_data.get("cameras", [])
         branch_cmds = []
+        # For each camera in the lane, generate all filesrc branches
         for cam_idx, cam in enumerate(cameras):
-            workloads = [w.lower() for w in cam["workloads"]]
+            workloads = [w.lower() for w in cam.get("workloads", [])]
             norm_workload_map = {k.lower(): v for k, v in workload_map.items()}
+            cam["lane_name"] = lane_name  # Pass lane name to camera dict
             cam_pipelines = build_dynamic_gstlaunch_command(cam, workloads, norm_workload_map, branch_idx=lane_idx, cam_idx=cam_idx, model_instance_map=model_instance_map, model_instance_counter=model_instance_counter, timestamp=timestamp)
             # Each cam_pipelines is a list, but for multistream, we want each camera's pipeline as a branch
             for p in cam_pipelines:
@@ -260,9 +264,20 @@ def main():
         lane_idx += 1
         # For multiple cameras, join each branch with ' ! ' and format multiline with backslashes
         if branch_cmds:
-            # Remove trailing ! from each branch before joining
-            cleaned_cmds = [b.rstrip('!').rstrip() for b in branch_cmds]
-            gst_cmd = "gst-launch-1.0 -e \\\n  " + " \\\n  ".join(cleaned_cmds)
+            # Remove trailing ! and ! \\ from each branch before joining
+            cleaned_cmds = []
+            for b in branch_cmds:
+                b = b.rstrip()
+                if b.endswith('! \\'):
+                    b = b[:-3].rstrip()
+                elif b.endswith('!'):
+                    b = b[:-1].rstrip()
+                cleaned_cmds.append(b)
+            # Join branches with line continuation, no trailing '!' at the end of any branch
+            if len(cleaned_cmds) == 1:
+                gst_cmd = "gst-launch-1.0 -e \\n" + cleaned_cmds[0]
+            else:
+                gst_cmd = "gst-launch-1.0 -e \\n" + " \\n".join(cleaned_cmds)
             lane_commands[lane_name] = gst_cmd
     # Print as JSON for downstream consumption
     import json

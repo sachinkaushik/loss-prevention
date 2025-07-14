@@ -39,8 +39,10 @@ for lane in $lane_names; do
     echo "# Generated on: $(date)" >> "$lane_file"
     echo "" >> "$lane_file"
     gst_cmd=$(echo "$lane_json" | jq -r --arg lane "$lane" '.[$lane]')
-    # Write the gst_cmd and logging on the same line for correct execution
-    echo "$gst_cmd 2>&1 | tee /home/pipeline-server/results/pipeline_${lane}_${timestamp}.log | (stdbuf -oL sed -n -E 's/.*total=([0-9]+\\.[0-9]+) fps.*/\\1/p' > /home/pipeline-server/results/fps_${lane}_${timestamp}.log)" >> "$lane_file"
+    # Replace literal '\n' with backslash and newline for proper shell formatting
+    formatted_gst_cmd=$(echo "$gst_cmd" | sed 's/\\n/ \\\n/g')
+    # Write the formatted_gst_cmd and logging on the same line for correct execution
+    echo "$formatted_gst_cmd 2>&1 | tee /home/pipeline-server/results/pipeline_${lane}_${timestamp}.log | (stdbuf -oL sed -n -E 's/.*total=([0-9]+\\.[0-9]+) fps.*/\\1/p' > /home/pipeline-server/results/fps_${lane}_${timestamp}.log)" >> "$lane_file"
     chmod +x "$lane_file"
     if [ -f "$lane_file" ]; then
         echo "################# Pipeline file created successfully: $lane_file ###################"

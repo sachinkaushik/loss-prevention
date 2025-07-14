@@ -12,18 +12,6 @@
           "width": 1800,
           "height": 750
         }
-      },
-      {
-        "camera_id": "cam2",
-        "fps": 15,
-        "fileSrc":"veg-32658421.mp4|https://videos.pexels.com/video-files/7246481/7246481-uhd_2160_3840_25fps.mp4", 
-        "workloads": ["hidden_items"],
-        "region_of_interest": {
-          "x": 550,
-          "y": 500,
-          "width": 1800,
-          "height": 750
-        }
       }
     ]
   },
@@ -33,7 +21,7 @@
         "camera_id": "cam1",
         "fps": 30,
         "fileSrc": "fake-scan-detection-32658412.mp4|https://www.pexels.com/download/video/32658412",
-        "workloads": ["items_in_basket"],
+        "workloads": ["fake_scan_detection"],
         "region_of_interest": {
           "x": 100,
           "y": 100,
