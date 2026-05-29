@@ -86,7 +86,7 @@ def get_minio_client():
         
         logger.info(f"############ MINIO_HOST =================={MINIO_HOST}")
         
-        MINIO_ENDPOINT = MINIO_HOST
+        MINIO_ENDPOINT = "minio-service:80"
         MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER")
         MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
         
