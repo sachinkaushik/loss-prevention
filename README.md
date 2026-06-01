@@ -57,7 +57,9 @@ The system includes an integrated RTSP server (MediaMTX) that streams video file
 - Intel drivers:
     - [Intel GPU drivers](https://dgpu-docs.intel.com/driver/client/overview.html)
     - [NPU](https://dlstreamer.github.io/dev_guide/advanced_install/advanced_install_guide_prerequisites.html#prerequisite-2-install-intel-npu-drivers)
-- Sufficient disk space for models, videos, and results
+- Hardware Requirements
+    - 32 GB RAM
+    - 300 GB Storage
 
 - For Corporate Networks with Proxy:
     ```sh
@@ -171,26 +173,26 @@ make down-lp
 ### 1. To build the images locally and run the application:
 
 ```sh
-    #Download the models
-    make download-models REGISTRY=false
-    #Update github performance-tool submodule
-    make update-submodules REGISTRY=false
-    #Download sample videos used by the performance tools
-    make download-sample-videos REGISTRY=false
-    #Run the LP application for visual mode
-    make run-render-mode DISPLAY=:0 REGISTRY=false RENDER_MODE=1
-    or
-    #Run the LP application for headless mode
-    make run REGISTRY=false
+#Download the models
+make download-models REGISTRY=false
+#Update github performance-tool submodule
+make update-submodules REGISTRY=false
+#Download sample videos used by the performance tools
+make download-sample-videos REGISTRY=false
+#Run the LP application for visual mode
+make run-render-mode DISPLAY=:0 REGISTRY=false RENDER_MODE=1
+or
+#Run the LP application for headless mode
+make run REGISTRY=false
 ```
 - Or simply:
 - Visual Mode
 ```sh
-    make run-lp DISPLAY=:0 REGISTRY=false RENDER_MODE=1
+make run-lp DISPLAY=:0 REGISTRY=false RENDER_MODE=1
 ```
 - Headless Mode
 ```sh
-    make run-lp REGISTRY=false
+make run-lp REGISTRY=false
 ```
 
 ### 2. Run the VLM based workload
@@ -198,17 +200,17 @@ make down-lp
 > [!IMPORTANT]
 > Set the below bash Environment Variables
 >```sh
->    #MinIO credentials (object storage)
->    export MINIO_ROOT_USER=<your-minio-username>
->    export MINIO_ROOT_PASSWORD=<your-minio-password>
->    #RabbitMQ credentials (message broker)
->    export RABBITMQ_USER=<your-rabbitmq-username>
->    export RABBITMQ_PASSWORD=<your-rabbitmq-password>
->    #Hugging Face token (required for gated models)
->    #Generate a token from: https://huggingface.co/settings/tokens
->    export GATED_MODEL=true
->    export HUGGINGFACE_TOKEN=<your-huggingface-token>
->    ```
+>#MinIO credentials (object storage)
+>export MINIO_ROOT_USER=<your-minio-username>
+>export MINIO_ROOT_PASSWORD=<your-minio-password>
+>#RabbitMQ credentials (message broker)
+>export RABBITMQ_USER=<your-rabbitmq-username>
+>export RABBITMQ_PASSWORD=<your-rabbitmq-password>
+>#Hugging Face token (required for gated models)
+>#Generate a token from: https://huggingface.co/settings/tokens
+>export GATED_MODEL=true
+>export HUGGINGFACE_TOKEN=<your-huggingface-token>
+>```
 - Run the workload
     
  ```
@@ -227,11 +229,11 @@ make benchmark
 ```
 + See the benchmarking results.
 
-    ```sh
-    make consolidate-metrics
+```sh
+make consolidate-metrics
 
-    cat benchmark/metrics.csv
-    ```
+cat benchmark/metrics.csv
+```
 >[!IMPORTANT]
 >For Advanced Benchmark settings, :point_right: [Benchmarking Guide](https://intel-retail.github.io/documentation/use-cases/loss-prevention/advanced.html)
 
