@@ -1,17 +1,17 @@
 # ================================
 # Stage 1: grab MediaMTX binaries
 # ================================
-FROM bluenviron/mediamtx:1.15.6 AS mediamtx
+FROM bluenviron/mediamtx:1.18.2 AS mediamtx
 
 
 # ================================
 # Stage 2: runtime image
 # ================================
-FROM alpine:3.19
+FROM alpine:3.23.4
 
 # ---- Use official Alpine HTTPS CDN (proxy-friendly) ----
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories && \
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories && \
     apk update --no-cache && \
     apk add --no-cache \
         ffmpeg \
