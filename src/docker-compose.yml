@@ -193,6 +193,7 @@ services:
       - THRESHOLD=${THRESHOLD:-16}
       - DISPLAY=${DISPLAY:-:0}
       - RENDER_MODE=${RENDER_MODE:-0}
+      - GST_VIDEO_SINK=${GST_VIDEO_SINK:-ximagesink use-shm=false}
       - DETECTION_THRESHOLD=${DETECTION_THRESHOLD}
       - LP_BASE_DIR=${LP_BASE_DIR}
       - RABBITMQ_HOST=rabbitmq
@@ -268,6 +269,7 @@ services:
       - LP_BASE_DIR=${LP_BASE_DIR}
       - DISPLAY=${DISPLAY:-:0}
       - RENDER_MODE=${RENDER_MODE:-0}    
+      - GST_VIDEO_SINK=${GST_VIDEO_SINK:-ximagesink use-shm=false}
       - CONTAINER_NAME=${CONTAINER_NAME:-gst}  
       - CAMERA_STREAM=${CAMERA_STREAM:-camera_to_workload.json}
       - WORKLOAD_DIST=${WORKLOAD_DIST:-workload_to_pipeline.json}

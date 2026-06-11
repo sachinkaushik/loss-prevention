@@ -43,6 +43,8 @@ TAG ?= 2026.0.0
 LP_TAG = $(shell cat VERSION)
 export LP_TAG
 RENDER_MODE ?=0
+GST_VIDEO_SINK ?= ximagesink use-shm=false
+export GST_VIDEO_SINK
 REGISTRY ?= true
 # Registry image references
 REGISTRY_MODEL_DOWNLOADER ?= intel/model-downloader:$(LP_TAG)
@@ -120,7 +122,7 @@ update-submodules:
 	git submodule update --init --recursive
 	@echo "Submodules updated (if any present)."
 
-run-lp: validate_workload_mapping update-submodules download-sample-videos
+run-lp: validate_workload_mapping 
 	@echo "Running loss prevention pipeline"
 	@LOG_FILE="vlm_loss_prevention.log"; \
 	mkdir -p $$(dirname $$LOG_FILE); \
