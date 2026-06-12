@@ -162,6 +162,8 @@ services:
     env_file:
       - ../lp-vlm/src/.env  
     depends_on:
+      rtsp-streamer:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       minio-service:
@@ -224,6 +226,8 @@ services:
       - my_network
     privileged: true
     depends_on:
+      rtsp-streamer:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       minio-service:
