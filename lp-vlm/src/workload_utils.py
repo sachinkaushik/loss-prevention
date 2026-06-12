@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import socket
 import subprocess
+import time
 
 # -------------------- Logger Setup --------------------
 logging.basicConfig(
@@ -22,49 +23,54 @@ RTSP_DEFAULT_HOST = os.getenv("RTSP_STREAM_HOST", "rtsp-streamer")
 RTSP_DEFAULT_PORT = os.getenv("RTSP_STREAM_PORT", "8554")
 
 # -------------------- Stream Validation --------------------
-def check_rtsp_stream_exists(stream_uri: str, timeout: int = 3) -> bool:
+def check_rtsp_stream_exists(stream_uri: str, timeout: int = 60) -> bool:
     """
     Check if a specific RTSP stream path is available using GStreamer.
+    Retries until the stream appears or timeout (seconds) is reached.
     Returns True if the stream is accessible, False otherwise.
     """
-    try:
-        import subprocess
-        
-        # Use gst-launch to test if stream exists with a very short timeout
-        # This will fail quickly if the stream doesn't exist (404 Not Found)
-        cmd = [
-            'timeout', '5',  # Kill after 5 seconds
-            'gst-launch-1.0',
-            'rtspsrc', f'location={stream_uri}',
-            'protocols=tcp',
-            'latency=200',
-            'timeout=2000000',  # 2 second RTSP timeout
-            '!', 'fakesink'
-        ]
-        
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=6,
-            text=True
-        )
-        
-        # Check if stderr contains "Not Found" or "404"
-        if result.stderr and ('Not Found' in result.stderr or '404' in result.stderr or 'Not found' in result.stderr):
-            logger.warning(f"RTSP stream not found: {stream_uri}")
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            # Use gst-launch to test if stream exists with a very short timeout.
+            # Fails quickly with 404 if the path is not yet published by ffmpeg.
+            cmd = [
+                'timeout', '5',
+                'gst-launch-1.0',
+                'rtspsrc', f'location={stream_uri}',
+                'protocols=tcp',
+                'latency=200',
+                'timeout=2000000',
+                '!', 'fakesink'
+            ]
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=6,
+                text=True
+            )
+            stderr = result.stderr or ""
+            if not any(t in stderr for t in ("Not Found", "Not found", "404")):
+                # Stream responded without a 404 — it's available
+                return True
+            logger.debug(f"RTSP attempt {attempt}: stream not yet available at {stream_uri}")
+        except subprocess.TimeoutExpired:
+            # Timeout during connect means the stream is live and accepting connections
+            return True
+        except Exception as e:
+            logger.warning(f"Could not check RTSP stream {stream_uri}: {e}")
+            return True
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.warning(f"RTSP stream not available after {timeout}s: {stream_uri}")
             return False
-            
-        # If command succeeded or timed out (stream exists but we didn't wait), it's available
-        return True
-        
-    except subprocess.TimeoutExpired:
-        # Timeout means stream connected successfully
-        return True
-    except Exception as e:
-        logger.warning(f"Could not check RTSP stream {stream_uri}: {e}")
-        # If we can't check, assume it exists to avoid false negatives
-        return True
+        wait = min(2, remaining)
+        logger.info(f"Waiting for RTSP stream {stream_uri} (attempt {attempt}, {remaining:.0f}s left)...")
+        time.sleep(wait)
 
 # -------------------- Load JSON --------------------
 def load_config(camera_cfg_path: str) -> dict:
@@ -203,17 +209,17 @@ def validate_and_extract_vlm_config(camera_cfg_path: str = None) -> dict:
     if not stream_name:
         raise ValueError(f"[ERROR] Camera {camera_id} has no stream identifier")
     
-    # Validate RTSP stream availability
+    # Validate RTSP stream availability — warning only.
+    # For VLM workloads STREAM_LOOP=false, so the video plays once and the
+    # stream path disappears before the model finishes loading.  A missing
+    # stream at config-validation time is therefore expected and must not
+    # abort the pipeline; GStreamer will handle the actual connection.
     if stream_uri.startswith("rtsp://"):
         if not check_rtsp_stream_exists(stream_uri):
             file_src = str(cam.get("fileSrc", "")).split("|")[0].strip()
             logger.warning(f"⚠️  WARNING: RTSP stream not available for camera '{camera_id}': {stream_uri}")
             logger.warning(f"    Expected video file: {file_src}")
-            logger.warning(f"    Please ensure the video exists in the sample-media directory.")
-            raise ValueError(
-                f"[ERROR] RTSP stream not available for camera {camera_id}: {stream_uri}. "
-                f"Expected video: {file_src}"
-            )
+            logger.warning(f"    The stream may have finished — the pipeline will proceed anyway.")
     
     # Format ROI as comma-separated string: x,y,x2,y2
     roi = f"{roi_dict.get('x', '')},{roi_dict.get('y', '')},{roi_dict.get('x2', '')},{roi_dict.get('y2', '')}"
