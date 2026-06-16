@@ -20,7 +20,7 @@ MODELSERVER_MODELS_DIR = "/home/pipeline-server/models"
 MODELSERVER_VIDEOS_DIR = "/home/pipeline-server/sample-media"
 RTSP_DEFAULT_HOST = os.getenv("RTSP_STREAM_HOST", "rtsp-streamer")
 RTSP_DEFAULT_PORT = os.getenv("RTSP_STREAM_PORT", "8554")
-RTSP_DEFAULT_LATENCY = os.getenv("RTSP_LATENCY", "200")
+RTSP_DEFAULT_LATENCY = os.getenv("RTSP_LATENCY", "500")
 
 # Configurable round robin count for model instance sharing
 try:
@@ -71,8 +71,8 @@ def check_rtsp_stream_exists(stream_uri: str, timeout: int = 3) -> bool:
             'gst-launch-1.0',
             'rtspsrc', f'location={stream_uri}',
             'protocols=tcp',
-            'latency=200',
-            'timeout=2000000',  # 2 second RTSP timeout
+            'latency=500',
+            'timeout=5000000',  # 5 second RTSP timeout
             '!', 'fakesink'
         ]
         
@@ -353,8 +353,8 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
                 f"rtspsrc name={source_info['gst_name']} location=\"{source_info['uri']}\" "
                 f"protocols=tcp latency={RTSP_DEFAULT_LATENCY} "
                 f"timeout=5000000 retry=3 drop-on-latency=true ! "
-                f"rtph264depay ! h264parse config-interval=-1 ! queue {queue_params} ! "
-                f"{DECODE} "
+                f"rtph264depay ! h264parse config-interval=-1 ! "
+                f"{DECODE} ! queue {queue_params}"
             )
         else:
             pipeline = (
@@ -402,8 +402,8 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
                 classify_counter[step_device] += 1
                 elem, _ = build_gst_element(step)
                 elem = elem.replace("gvaclassify", f"gvaclassify model-instance-id={model_instance_id}")
-                pipeline += f" ! {elem} ! queue {queue_params}"
-                last_added_queue = True
+                pipeline += f" ! {elem}"
+                last_added_queue = False
             elif step["type"] == "gvainference":
                 # Use round robin model instance sharing per device (configurable count)
                 step_device = step.get("device", "CPU").upper()
@@ -432,7 +432,7 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
             pipeline += f" ! gvametaconvert ! tee name={tee_name} "
             results_dir = "/home/pipeline-server/results"
             out_file = f"{results_dir}/rs-{branch_idx+1}_{idx+1}__{name_idx_counter[0]}_{timestamp}.jsonl"
-            pipeline += f"    {tee_name}. ! queue {queue_params} ! gvametapublish file-format=json-lines file-path={out_file} ! gvafpscounter name={stream_id} ! fakesink sync=false async=false "
+            pipeline += f"    {tee_name}. ! gvametapublish file-format=json-lines file-path={out_file} ! gvafpscounter name={stream_id} ! fakesink sync=false async=false "
         else:
             pipeline += f" ! tee name={tee_name}  {tee_name}. ! queue {queue_params} ! gvafpscounter name={stream_id} ! fakesink sync=false async=false "
             #pipeline += f"    {tee_name}. ! queue ! gvafpscounter ! fakesink sync=false async=false "
