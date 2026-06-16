@@ -255,7 +255,7 @@ def build_gst_element(cfg):
         # Try to get module and function from cfg (populated from camera_to_workload.json)
         module = cfg.get("module", "")
         function = cfg.get("function", "")
-        elem = f"gvapython module=/home/pipeline-server/src/{module} function={function}  "
+        elem = f"gvapython module=/home/pipeline-server/src/{module} class=PersonReID "
     elif cfg["type"] in ["gvatrack", "gvaattachroi", "gvametaconvert", "gvametapublish", "gvawatermark", "gvafpscounter", "fpsdisplaysink", "queue", "videoconvert", "decodebin", "filesrc", "fakesink"]:
         elem = cfg["type"]
     else:
@@ -348,8 +348,9 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
             DECODE = "decodebin"
         if source_info.get("type") == "rtsp":
             name_idx_counter[0] += 1
+            source_info["gst_name"] = f"{source_info['name']}_{name_idx_counter[0]}"
             pipeline = (
-                f"rtspsrc name={source_info['name']}_{name_idx_counter[0]} location=\"{source_info['uri']}\" "
+                f"rtspsrc name={source_info['gst_name']} location=\"{source_info['uri']}\" "
                 f"protocols=tcp latency={RTSP_DEFAULT_LATENCY} "
                 f"timeout=5000000 retry=3 drop-on-latency=true ! "
                 f"rtph264depay ! h264parse config-interval=-1 ! "
@@ -415,6 +416,8 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
                 last_added_queue = True
             elif step["type"] == "gvapython":
                 elem, _ = build_gst_element(step)
+                stream_id = f"{source_info['gst_name']}"
+                elem = elem + f" arg='[\"{stream_id}\"]'"
                 pipeline += f" ! {elem} ! queue {queue_params}"
                 last_added_queue = False            
             # Only add queue if not just added by gvadetect/gvatrack

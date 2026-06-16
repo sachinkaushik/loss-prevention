@@ -1,95 +1,161 @@
-
 import uuid
 import json
-import math
 import os
+from datetime import datetime
 
-frame_counter = 0
-# In-memory person DB: {person_id: bbox}
-person_db = {}
 
-def iou(b1, b2):
-    # Intersection over Union for two bboxes
-    xA = max(b1[0], b2[0])
-    yA = max(b1[1], b2[1])
-    xB = min(b1[2], b2[2])
-    yB = min(b1[3], b2[3])
-    interArea = max(0, xB - xA) * max(0, yB - yA)
-    boxAArea = (b1[2] - b1[0]) * (b1[3] - b1[1])
-    boxBArea = (b2[2] - b2[0]) * (b2[3] - b2[1])
-    iou = interArea / float(boxAArea + boxBArea - interArea + 1e-6)
-    return iou
+class PersonReID:
+    def __init__(self, stream_id="unknown_stream"):
+        self.stream_id = stream_id
 
-def process_frame(frame):
-    global frame_counter, person_db
-    frame_counter += 1
+        self.frame_counter = 0
 
-    # Load camera_id and workload from camera_to_workload.json    
-    camera_id = "camera_001"
-    workload = "unknown"
+        # In-memory person DB: {person_id: bbox}
+        self.person_db = {}
 
-    camera_stream = os.environ.get("CAMERA_STREAM", "camera_to_workload.json")
-    config_path = f"/home/pipeline-server/configs/{camera_stream}"
-    
-    if os.path.exists(config_path):
+        print(f"[custom_reid] initialized stream_id={self.stream_id}")
+
+    def iou(self, b1, b2):
+        xA = max(b1[0], b2[0])
+        yA = max(b1[1], b2[1])
+        xB = min(b1[2], b2[2])
+        yB = min(b1[3], b2[3])
+
+        inter_area = max(0, xB - xA) * max(0, yB - yA)
+
+        boxA_area = (b1[2] - b1[0]) * (b1[3] - b1[1])
+        boxB_area = (b2[2] - b2[0]) * (b2[3] - b2[1])
+
+        return inter_area / float(
+            boxA_area + boxB_area - inter_area + 1e-6
+        )
+
+    def load_camera_config(self):
+        camera_id = "camera_001"
+        workload = "unknown"
+
+        camera_stream = os.environ.get(
+            "CAMERA_STREAM",
+            "camera_to_workload.json"
+        )
+
+        config_path = (
+            f"/home/pipeline-server/configs/{camera_stream}"
+        )
+
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+
+                cameras = (
+                    config.get("lane_config", {})
+                    .get("cameras", [])
+                )
+
+                if cameras:
+                    camera = cameras[0]
+
+                    camera_id = camera.get(
+                        "camera_id",
+                        camera_id
+                    )
+
+                    workloads = camera.get(
+                        "workloads",
+                        []
+                    )
+
+                    if workloads:
+                        workload = workloads[0]
+
+            except Exception as e:
+                print(
+                    "[custom_reid] ERROR reading "
+                    f"camera_to_workload.json: {e}"
+                )
+
+        return camera_id, workload
+
+    def process_frame(self, frame):
+        self.frame_counter += 1
+
+        camera_id, workload = self.load_camera_config()
+
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%dT%H:%M:%S.%f"
+        )[:-3]
+
+        output = {
+            "event_id": str(uuid.uuid4()),
+            "timestamp": timestamp,
+            "frame_id": f"frame_{self.frame_counter:06d}",
+            "stream_id": self.stream_id,
+            "station_id": "self_checkout_01",
+            "camera_id": camera_id,
+            "camera_name": "self_checkout_overhead",
+            "workload": workload,
+            "persons": []
+        }
+
+        for roi in frame.regions():
+            rect = roi.rect()
+
+            person_id = roi.object_id()
+
+            bbox = [
+                rect.x,
+                rect.y,
+                rect.x + rect.w,
+                rect.y + rect.h
+            ]
+
+            assigned_id = None
+
+            for pid, prev_bbox in self.person_db.items():
+                if self.iou(bbox, prev_bbox) > 0.5:
+                    assigned_id = pid
+                    break
+
+            if assigned_id is None:
+                assigned_id = f"anon_{person_id}"
+
+            self.person_db[assigned_id] = bbox
+
+            output["persons"].append({
+                "bbox": {
+                    "x": rect.x,
+                    "y": rect.y,
+                    "w": rect.w,
+                    "h": rect.h
+                },
+                "confidence": round(
+                    roi.confidence(),
+                    2
+                ),
+                "person_id": assigned_id
+            })
+
+        run_timestamp = os.environ.get(
+            "TIMESTAMP",
+            "unknown"
+        )
+
+        json_line = json.dumps(output)
+
+        out_file = (
+            f"/home/pipeline-server/results/"
+            f"rs-{run_timestamp}-{self.stream_id}.jsonl"
+        )
+
         try:
-            with open(config_path, "r") as f:
-                config = json.load(f)
-            # Assume lane_config->cameras is a list of dicts with camera_id and workloads
-            cameras = config.get("lane_config", {}).get("cameras", [])
-            if cameras:
-                camera_id = cameras[0].get("camera_id", camera_id)
-                workload_list = cameras[0].get("workloads", [])
-                workload = workload_list[0] if workload_list else workload
-        except Exception as e:
-            print(f"[custom_reid] ERROR reading camera_to_workload.json: {e}")
-    from datetime import datetime
-    # ISO 8601 format with milliseconds
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
-    output = {
-        "event_id": str(uuid.uuid4()),
-        "timestamp": timestamp,
-        "frame_id": f"frame_{frame_counter:06d}",
-        "station_id": "self_checkout_01",
-        "camera_id": camera_id,
-        "camera_name": "self_checkout_overhead",        
-        "persons": []
-    }
+            with open(out_file, "a") as f:
+                f.write(json_line + "\n")
 
-    # Optionally extract regions (ROIs) if available
-    for roi in frame.regions():
-        rect = roi.rect()  # returns normalized bbox
-        person_id = roi.object_id() # person_id
-        bbox = [rect.x, rect.y, rect.x + rect.w, rect.y + rect.h]
-        assigned_id = None
-        # Check for matching person in DB (simple IoU threshold)
-        for pid, prev_bbox in person_db.items():
-            if iou(bbox, prev_bbox) > 0.5:
-                assigned_id = pid
-                break
-        if assigned_id is None:
-            assigned_id = f"anon_{person_id}"
-            person_db[assigned_id] = bbox
-        else:
-            person_db[assigned_id] = bbox  # update position
-        output["persons"].append({
-            "bbox": {
-                "x": rect.x,
-                "y": rect.y,
-                "w": rect.w,
-                "h": rect.h
-            },
-            "confidence": round(roi.confidence(), 2),
-            "person_id": assigned_id
-        })
-    
-    timestamp = os.environ.get("TIMESTAMP")
-    json_line = json.dumps(output)
-    # Use camera_id and workload in output filename
-    out_file = f"/home/pipeline-server/results/rs-_{timestamp}.jsonl"
-    try:
-        with open(out_file, "a") as f:
-            f.write(json_line + "\n")
-    except Exception as e:
-        print(f"[custom_reid] ERROR: Failed to write to {out_file}: {e}")
-    return True
+        except Exception as e:
+            print(
+                "[custom_reid] ERROR: "
+                f"Failed to write to {out_file}: {e}"
+            )
+
+        return True
