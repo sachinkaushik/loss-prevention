@@ -20,7 +20,7 @@ MODELSERVER_MODELS_DIR = "/home/pipeline-server/models"
 MODELSERVER_VIDEOS_DIR = "/home/pipeline-server/sample-media"
 RTSP_DEFAULT_HOST = os.getenv("RTSP_STREAM_HOST", "rtsp-streamer")
 RTSP_DEFAULT_PORT = os.getenv("RTSP_STREAM_PORT", "8554")
-RTSP_DEFAULT_LATENCY = os.getenv("RTSP_LATENCY", "500")
+RTSP_DEFAULT_LATENCY = os.getenv("RTSP_LATENCY", "300")
 
 # Configurable round robin count for model instance sharing
 try:
@@ -429,18 +429,18 @@ def build_dynamic_gstlaunch_command(camera, workloads, workload_map, branch_idx=
         stream_id = f"stream{branch_idx+1}_{idx+1}_{name_idx_counter[0]}"
         has_gvapython = any(step.get("type") == "gvapython" for step in steps)
         if not has_gvapython:
-            pipeline += f" ! gvametaconvert ! tee name={tee_name} "
+            pipeline += f" ! gvametaconvert "
             results_dir = "/home/pipeline-server/results"
             out_file = f"{results_dir}/rs-{branch_idx+1}_{idx+1}__{name_idx_counter[0]}_{timestamp}.jsonl"
-            pipeline += f"    {tee_name}. ! gvametapublish file-format=json-lines file-path={out_file} ! gvafpscounter name={stream_id} ! fakesink sync=false async=false "
+            pipeline += f" ! gvametapublish file-format=json-lines file-path={out_file} ! gvafpscounter name={stream_id} "
         else:
-            pipeline += f" ! tee name={tee_name}  {tee_name}. ! queue {queue_params} ! gvafpscounter name={stream_id} ! fakesink sync=false async=false "
+            pipeline += f" ! queue {queue_params} ! gvafpscounter name={stream_id} "
             #pipeline += f"    {tee_name}. ! queue ! gvafpscounter ! fakesink sync=false async=false "
         render_mode = os.environ.get("RENDER_MODE", "0")
         if render_mode == "1":
-            pipeline += f"    {tee_name}. ! queue {queue_params} ! gvawatermark ! {vapostproc_elem} fpsdisplaysink video-sink=autovideosink text-overlay=true signal-fps-measurements=true"
+            pipeline += f"  ! queue {queue_params} ! gvawatermark ! {vapostproc_elem} fpsdisplaysink video-sink=autovideosink text-overlay=true signal-fps-measurements=true"
         else:
-            pipeline += f"    {tee_name}. ! queue {queue_params} ! fpsdisplaysink video-sink=fakesink signal-fps-measurements=true"
+            pipeline += f"  ! queue {queue_params} ! fpsdisplaysink video-sink=fakesink signal-fps-measurements=true"
         pipelines.append(pipeline)
     return pipelines
 
