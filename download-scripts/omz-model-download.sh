@@ -83,7 +83,11 @@ rm -rf "$OMZ_DIR"
 # ==============================
 if [[ "$MODEL_NAME" == face-reidentification-retail-* ]] || [[ "$MODEL_NAME" == age-gender-recognition-retail-* ]] || [[ "$MODEL_NAME" == face-detection-retail-* ]]; then
     echo "=== Downloading model_proc JSON for: $MODEL_NAME ..."
-    MODEL_PROC_URL="https://raw.githubusercontent.com/open-edge-platform/dlstreamer/refs/tags/v2025.2.0/samples/gstreamer/model_proc/intel/${MODEL_NAME}.json"
+    if [[ "$MODEL_NAME" == face-reidentification-retail-* ]]; then
+      MODEL_PROC_URL="https://raw.githubusercontent.com/open-edge-platform/dlstreamer/refs/tags/v2025.2.0/samples/gstreamer/model_proc/${MODEL_NAME}.json"
+    else
+      MODEL_PROC_URL="https://raw.githubusercontent.com/open-edge-platform/dlstreamer/refs/tags/v2025.2.0/samples/gstreamer/model_proc/intel/${MODEL_NAME}.json"
+    fi
     MODEL_PROC_PATH="$MODELS_PATH/$MODEL_NAME/${MODEL_NAME}.json"
 
     if [[ -f "$MODEL_PROC_PATH" ]]; then
