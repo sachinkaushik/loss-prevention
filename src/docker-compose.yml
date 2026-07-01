@@ -173,7 +173,7 @@ services:
 
   vlm-pipeline-runner:
     container_name: vlm-pipeline-runner    
-    image: intel/pipeline-runner-lp:${LP_TAG}
+    image: intel/pipeline-runner-lp:latest
     #user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     shm_size: '512m'
     ulimits:
@@ -246,7 +246,7 @@ services:
       args:
         - HTTP_PROXY=${HTTP_PROXY}
         - HTTPS_PROXY=${HTTPS_PROXY}
-    image: intel/pipeline-runner-lp:${LP_TAG}
+    image: intel/pipeline-runner-lp:latest
     #user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     shm_size: '512m'
     ulimits:
