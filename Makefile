@@ -40,7 +40,7 @@ DOCKER_COMPOSE ?= docker-compose.yml
 STREAM_LOOP ?= true
 
 
-TAG ?= 2026.1.0
+TAG ?= latest
 LP_TAG = $(shell cat VERSION)
 export LP_TAG
 RENDER_MODE ?=0
