@@ -1,9 +1,10 @@
 {
   "lane_config": {
-    "cameras": [     
-      { 
+    "cameras": [
+      {
         "camera_id": "cam1",
         "fps": 15,
+        "targetFps": 15,
         "width": 1080,
         "height": 1920,
         "fileSrc":"lp-vlm.mp4|https://www.pexels.com/download/video/35256160", 
