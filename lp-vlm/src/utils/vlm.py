@@ -1,101 +1,47 @@
 """Vision Language Model integration for grocery item detection."""
 import json
-from typing import List, Dict, Any, Tuple
+from typing import Dict, Any, Tuple
 from io import BytesIO
 import os
-import re
 import time
 import numpy as np
-import openvino as ov
 from PIL import Image
 import requests
-import sys
 from pathlib import Path
-import argparse
-from utils.config import VLM_URL, VLM_MODEL, LP_IP, logger, LP_PORT, SAMPLE_MEDIA_DIR, FRAME_DIR_VOL_BASE, FRAME_DIR, LP_APP_BASE_DIR, RESULTS_DIR
+from utils.config import OVMS_ENDPOINT, OVMS_MODEL_NAME, logger
 from utils.prompts import *
-from openvino_genai import VLMPipeline, GenerationConfig
-from vlm_metrics_logger import (
-    log_start_time, 
-    log_end_time, 
-    log_custom_event,
-    log_performance_metric
-)
+from utils.ovms_client import OVMSVLMClient
 
 WORKLOAD_PIPELINE_CONFIG = "/app/lp/configs/"
 TARGET_WORKLOAD = "lp_vlm"  # normalized compare
-# Get env variables
-frames_base_dir = os.path.join(LP_APP_BASE_DIR, RESULTS_DIR, FRAME_DIR)
 
-# VLMComponent implementation (singleton pattern)
-class VLMComponent:
-    _model = None
-    _config = None
-    
-    def __init__(self, model_path, device, max_new_tokens=512, temperature=0.0):
-        self.model_path = model_path
-        self.device = device
-        self.temperature = temperature
-        self.max_new_tokens = max_new_tokens
-        
-        config_key = (model_path, device, temperature, max_new_tokens)
-        if VLMComponent._model is None or VLMComponent._config != config_key:
-            logger.info(f"[VLM] Loading model: {model_path} on {device}")
-            VLMComponent._model = VLMPipeline(
-                models_path=model_path,
-                device=device
-            )
-            VLMComponent._config = config_key
-            logger.info("[VLM] Model loaded.\n")
-        
-        self.vlm = VLMComponent._model
-        self.gen_config = GenerationConfig(
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            do_sample=False
-        )
-    
-    def generate(self, prompt, images=None):
-        """Generate output from VLM model."""
-        if images is None:
-            images = []
-        
-        ov_frames = [ov.Tensor(img) for img in images]
-        output = self.vlm.generate(prompt, images=ov_frames, generation_config=self.gen_config)
-        log_performance_metric("USECASE_2", output)
-        return output
+_ovms_client = None
 
 
-# Global VLMComponent instance
-_vlm_component = None
-
-def get_vlm_component():
-    """Get or initialize VLMComponent singleton."""
-    global _vlm_component
-    if _vlm_component is None:
+def get_ovms_client():
+    global _ovms_client
+    if _ovms_client is None:
         try:
-            vlm_model_name, vlm_precision, vlm_device = get_vlm_model_from_workload()
-            model_path = os.environ.get("VLM_MODEL_PATH", 
-                                       f"/home/pipeline-server/lp-vlm/ov-model/{vlm_model_name}/{vlm_precision}")
-            device = vlm_device
+            raw_model_name, _, _ = get_vlm_model_from_workload()
         except Exception as e:
-            logger.warning(f"Failed to get VLM model from config: {e}, using defaults")
-            model_path = os.environ.get("VLM_MODEL_PATH", 
-                                       "/home/pipeline-server/lp-vlm/ov-model/Qwen2.5-VL-7B-Instruct/int8")
-            device = os.environ.get("VLM_DEVICE", "GPU")
-        
-        max_tokens = int(os.environ.get("VLM_MAX_TOKENS", "512"))        
-        logger.info(f"Initializing VLMComponent with model_path={model_path}, device={device}")
-        _vlm_component = VLMComponent(
-            model_path=model_path,
-            device=device,
+            logger.warning(f"Failed to get OVMS model from config: {e}, using defaults")
+            raw_model_name = OVMS_MODEL_NAME
+
+        endpoint = os.environ.get("OVMS_ENDPOINT", OVMS_ENDPOINT)
+        model_name = os.environ.get("OVMS_MODEL_NAME", raw_model_name)
+        max_tokens = int(os.environ.get("VLM_MAX_TOKENS", "512"))
+
+        logger.info(f"Initializing OVMS client with endpoint={endpoint}, model={model_name}")
+        _ovms_client = OVMSVLMClient(
+            endpoint=endpoint,
+            model_name=model_name,
             max_new_tokens=max_tokens,
-            temperature=0.0
+            temperature=0.0,
         )
-    return _vlm_component
+    return _ovms_client
 
 
-def extract_prompt_and_images(frame_records: Dict[str, Any], use_case: str = None) -> Tuple[str, List[np.ndarray]]:
+def extract_prompt_and_images(frame_records: Dict[str, Any], use_case: str = None) -> Tuple[str, list[np.ndarray]]:
     """Extract prompt and images from frame_records."""
     # Select prompt based on use_case
     if use_case == "decision_agent":
@@ -133,20 +79,20 @@ def call_vlm(
     seed: int = 0,
     use_case: str = None,
 ) -> Tuple[bool, Dict[str, Any], str]:
-    """Call the Vision Language Model to analyze frames using VLMComponent or HTTP API.""" 
+    """Call the Vision Language Model to analyze frames using OVMS backend."""
     try:
+        _ = seed  # kept for API compatibility with existing callers
         start_time = time.time()
-        logger.info("Making OVGenAI VLM call...")
+        logger.info("Making ovms VLM call...")
         
         # Extract prompt and images
         prompt, images = extract_prompt_and_images(frame_records, use_case)            
         
-        # Use local VLMComponent
         if not images and use_case != "decision_agent":
             return False, {}, "No images extracted from frame_records"
-        
-        vlm = get_vlm_component()
-        #logger.info(f"VLM Input: {prompt}, images count: {len(images)}")
+
+        vlm = get_ovms_client()
+
         output = vlm.generate(prompt, images=images)
         
         elapsed = time.time() - start_time
@@ -190,7 +136,7 @@ def get_vlm_model_from_workload(workload_config_path: str = None) -> tuple:
     Extract vlm_model, vlm_precision, and vlm_device from workload configuration.
 
     Returns:
-        (vlm_model, vlm_precision, vlm_device)
+        (raw_vlm_model, vlm_precision, vlm_device)
     """
     # Resolve config path
     workload_dist = os.getenv("WORKLOAD_DIST")
@@ -226,10 +172,6 @@ def get_vlm_model_from_workload(workload_config_path: str = None) -> tuple:
 
             if not vlm_model:
                 raise ValueError("vlm_model is missing in VLM configuration")
-
-            # Optional cleanup
-            if vlm_model.startswith("Qwen/"):
-                vlm_model = vlm_model.replace("Qwen/", "", 1)
 
             logger.info(
                 "✅ Found VLM config: model=%s, precision=%s, device=%s",

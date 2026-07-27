@@ -12,6 +12,13 @@ MODELS_PATH="${MODELS_DIR:-/workspace/models}"
 mkdir -p "$MODELS_PATH"
 cd "$MODELS_PATH" || { echo "Failure to cd to $MODELS_PATH"; exit 1; }
 
+ovms_model_ready() {
+    local model_name="$1"
+    local model_dir="$MODELS_PATH/ovms-model/$model_name"
+
+    [[ -f "$model_dir/graph.pbtxt" ]] && ls "$model_dir"/*.xml >/dev/null 2>&1
+}
+
 if [[ "$MODEL_NAME" == yolo* ]]; then
     echo "[INFO] ###### Downloading YOLO model: $MODEL_NAME ($PRECISION)"
     python3 "$SCRIPT_BASE_PATH/model_convert.py" export_yolo "$MODEL_NAME" "$MODELS_PATH"
@@ -26,15 +33,15 @@ if [[ "$MODEL_NAME" == yolo* ]]; then
     python3 "$SCRIPT_BASE_PATH/model_convert.py" quantize_yolo "$MODEL_NAME" "$quant_dataset" "$MODELS_PATH"
 elif [[ "$MODEL_NAME" == Qwen* ]]; then
     echo "[INFO] ###### Downloading VLM model: $MODEL_NAME ($PRECISION)"    
-    # Extract model name after "/" if present (e.g., Qwen/Qwen2.5-VL-7B-Instruct → Qwen2.5-VL-7B-Instruct)
-    ACTUAL_MODEL_NAME="${MODEL_NAME##*/}"    
-    # Check if model already exists
-    MODEL_PATH="$MODELS_PATH/ov-model/$ACTUAL_MODEL_NAME/$PRECISION/openvino_language_model.xml"
-    if [[ -d "$MODEL_PATH" ]]; then
-        echo "[INFO] VLM model already exists at $MODEL_PATH, skipping download."
-    elif [[ -f "$SCRIPT_BASE_PATH/compress_model.sh" ]]; then
-        echo "[INFO] ###### Compressing VLM model: $MODEL_NAME ($PRECISION)"
-        bash "$SCRIPT_BASE_PATH/compress_model.sh" "$MODEL_NAME" "$PRECISION" "${HUGGINGFACE_TOKEN:-}"
+    OVMS_MODEL_DIR="$MODELS_PATH/ovms-model/$MODEL_NAME"
+    if ovms_model_ready "$MODEL_NAME"; then
+        echo "[INFO] OVMS VLM model already exists at $OVMS_MODEL_DIR, skipping download."
+    elif [[ -f "$SCRIPT_BASE_PATH/setup_ovms_vlm_model.sh" ]]; then
+        echo "[INFO] ###### Exporting VLM model for OVMS: $MODEL_NAME ($PRECISION)"
+        bash "$SCRIPT_BASE_PATH/setup_ovms_vlm_model.sh" "$MODEL_NAME" "$PRECISION" "${HUGGINGFACE_TOKEN:-}"
+    else
+        echo "[ERROR] Missing required script: $SCRIPT_BASE_PATH/setup_ovms_vlm_model.sh" >&2
+        exit 1
     fi
 elif [[ "$MODEL_NAME" == face-reidentification-retail-* ]] || [[ "$MODEL_NAME" == age-gender-recognition-retail-* ]] && [[ "$PRECISION" == "FP16" ]]; then
     echo "[INFO] ###### Downloading face model: $MODEL_NAME ($PRECISION)"

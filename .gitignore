@@ -2,7 +2,7 @@ models/
 results/
 src/pipelines/
 benchmark/
-lp-vlm/microservices/vlm/ov-models/
+lp-vlm/models/ovms-model/
 performance-tools/
 lp-vlm/src/loss_prevention_app.log
 lp-vlm/vlm-results/

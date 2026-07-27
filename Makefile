@@ -1,7 +1,10 @@
 # Copyright © 2025 Intel Corporation. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-.PHONY: update-submodules download-models download-samples download-sample-videos build-assets-downloader run-assets-downloader build-pipeline-runner run-loss-prevention clean-images clean-containers clean-all clean-project-images validate-config validate-camera-config validate-all-configs check-models
+.PHONY: update-submodules download-models download-samples download-sample-videos build-assets-downloader run-assets-downloader build-pipeline-runner run-loss-prevention clean-images clean-containers clean-all clean-project-images validate-config validate-camera-config validate-all-configs check-models check-device check-env show-config help logs-vlm logs-all restart-vlm check-model test-api status
+
+-include .env
+export
 
 
 HTTP_PROXY := $(or $(HTTP_PROXY),$(http_proxy))
@@ -13,9 +16,10 @@ export HTTPS_PROXY
 export PWD=$(shell pwd)
 HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 export VLM_DEVICE ?= CPU
+TARGET_DEVICE ?= $(VLM_DEVICE)
 export VLM_SERVICE_PORT ?= 8000
 export LP_BASE_DIR=$(PWD)
-export LLM_BASE_DIR=$(PWD)/microservices/vlm/ov-models
+export LLM_BASE_DIR=$(PWD)/models/ovms-model
 export MINIO_API_HOST_PORT=4000
 export MINIO_CONSOLE_HOST_PORT=4001
 export LP_IP=$(HOST_IP)
@@ -38,6 +42,13 @@ INFERENCE_INTERVAL ?= 3
 REGISTRY ?= true
 DOCKER_COMPOSE ?= docker-compose.yml
 STREAM_LOOP ?= true
+
+# OVMS and VLM defaults
+VLM_BACKEND ?= ovms
+OVMS_ENDPOINT ?= http://ovms-vlm:8000
+OVMS_MODEL_NAME ?= Qwen/Qwen2.5-VL-7B-Instruct
+OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:latest,openvino/model_server:latest-gpu)
+OVMS_HOST_PORT ?= 8002
 
 
 TAG ?= latest
@@ -107,7 +118,6 @@ run-model-downloader:
 		-e HF_HUB_DOWNLOAD_TIMEOUT=600 \
 		-v "$(shell pwd)/models:/workspace/models" \
 		-v "$(shell pwd)/configs:/workspace/configs" \
-		-v "$(shell pwd)/models/ov-model:/root/.cache/huggingface" \
 		$(REGISTRY_MODEL_DOWNLOADER)
 	@echo "assets downloader completed"
 
@@ -120,6 +130,94 @@ update-submodules:
 	git submodule deinit -f .
 	git submodule update --init --recursive
 	@echo "Submodules updated (if any present)."
+
+check-device:
+	@GRAPH="models/ovms-model/$(OVMS_MODEL_NAME)/graph.pbtxt"; \
+	if [ ! -f "$$GRAPH" ]; then \
+		echo "[INFO] graph.pbtxt not found, skipping device check"; \
+		exit 0; \
+	fi; \
+	VLM_DEV=$$(jq -r '.workload_pipeline_map.lp_vlm[]? | select((.type // "" | ascii_downcase) == "vlm") | .vlm_device // empty' configs/$(WORKLOAD_DIST) 2>/dev/null | head -1 || true); \
+	if [ -z "$$VLM_DEV" ] || [ "$$VLM_DEV" = "null" ]; then VLM_DEV="$(VLM_DEVICE)"; fi; \
+	GRAPH_DEV=$$(grep -E '^[[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*"[^"]+"' "$$GRAPH" | head -1 | sed -E 's/^[[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*"([^"]+)".*/\2/' || true); \
+	if [ -z "$$GRAPH_DEV" ]; then \
+		echo "[INFO] No target_device/device field found in $$GRAPH, skipping device update"; \
+		exit 0; \
+	fi; \
+	if [ "$$GRAPH_DEV" = "$$VLM_DEV" ]; then \
+		echo "[INFO] graph.pbtxt device already matches $$VLM_DEV"; \
+	else \
+		echo "[INFO] Updating graph.pbtxt device: $$GRAPH_DEV → $$VLM_DEV"; \
+		sed -i -E "0,/^([[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*\")[^\"]+(\".*)$$/s//\\1$$VLM_DEV\\3/" "$$GRAPH"; \
+		echo "[INFO] graph.pbtxt updated to $$VLM_DEV"; \
+	fi
+
+check-env:
+	@echo "[INFO] Validating environment configuration..."
+	@if [ "$(VLM_BACKEND)" != "ovms" ]; then \
+		echo "[ERROR] VLM_BACKEND must be 'ovms' for the current OVMS-only VLM runtime (got: $(VLM_BACKEND))"; \
+		exit 1; \
+	fi
+	@if [ -z "$(OVMS_ENDPOINT)" ]; then \
+		echo "[ERROR] OVMS_ENDPOINT is required when VLM_BACKEND=ovms"; \
+		exit 1; \
+	fi
+	@if [ -z "$(OVMS_MODEL_NAME)" ]; then \
+		echo "[ERROR] OVMS_MODEL_NAME is required when VLM_BACKEND=ovms"; \
+		exit 1; \
+	fi
+	@echo "[INFO] Environment configuration valid"
+	@$(MAKE) --no-print-directory check-device
+
+show-config:
+	@echo "Current configuration"
+	@echo "====================="
+	@echo "VLM_BACKEND   = $(VLM_BACKEND)"
+	@echo "VLM_DEVICE    = $(VLM_DEVICE)"
+	@echo "TARGET_DEVICE = $(TARGET_DEVICE)"
+	@echo "OVMS_ENDPOINT = $(OVMS_ENDPOINT)"
+	@echo "OVMS_MODEL_NAME = $(OVMS_MODEL_NAME)"
+	@echo "OVMS_IMAGE    = $(OVMS_IMAGE)"
+	@echo "OVMS_HOST_PORT = $(OVMS_HOST_PORT)"
+
+help:
+	@echo "Loss prevention - common commands"
+	@echo "================================="
+	@echo "make run-lp            - Start the loss prevention stack"
+	@echo "make down-lp           - Stop the stack"
+	@echo "make check-env         - Validate OVMS/VLM settings"
+	@echo "make check-device      - Sync graph.pbtxt device"
+	@echo "make show-config       - Print effective OVMS/VLM config"
+	@echo "make status            - Show compose service status"
+	@echo "make logs-vlm          - Follow OVMS logs"
+	@echo "make logs-all          - Follow all service logs"
+	@echo "make restart-vlm       - Restart OVMS service"
+	@echo "make check-model       - Query OVMS model status"
+	@echo "make test-api          - Quick OVMS endpoint test"
+
+status:
+	@docker compose -f src/$(DOCKER_COMPOSE) ps
+
+logs-vlm:
+	@echo "Showing OVMS VLM logs (Ctrl+C to exit)..."
+	@docker logs -f ovms-vlm
+
+logs-all:
+	@echo "Showing all service logs (Ctrl+C to exit)..."
+	@docker compose -f src/$(DOCKER_COMPOSE) logs -f
+
+restart-vlm:
+	@echo "Restarting OVMS VLM service..."
+	@docker compose -f src/$(DOCKER_COMPOSE) restart ovms-vlm
+
+check-model:
+	@echo "Checking OVMS model status on localhost:$(OVMS_HOST_PORT)..."
+	@curl -s "http://localhost:$(OVMS_HOST_PORT)/v1/config" | jq '."$(OVMS_MODEL_NAME)" // .' 2>/dev/null || \
+		echo "OVMS not responding. Is ovms-vlm running?"
+
+test-api:
+	@echo "=== OVMS Config Endpoint ==="
+	@curl -s "http://localhost:$(OVMS_HOST_PORT)/v1/config" | jq . 2>/dev/null || curl -s "http://localhost:$(OVMS_HOST_PORT)/v1/config"
 
 run-lp: validate_workload_mapping update-submodules download-sample-videos
 	@echo "Running loss prevention pipeline"
@@ -324,6 +422,7 @@ clean-docs:
 
 validate_workload_mapping:
 	python3 src/validate-configs.py --validate-workload-mapping --camera-config configs/$(CAMERA_STREAM) --pipeline-config configs/$(WORKLOAD_DIST)
+	@$(MAKE) --no-print-directory check-device
 
 validate-pipeline-config:
 	@echo "Validating pipeline configuration..."
