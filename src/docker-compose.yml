@@ -118,7 +118,7 @@ services:
     ports:
       - "${OVMS_HOST_PORT:-8002}:8000"
     command: >
-      --config_path /models/config.json --port 8000
+      --config_path /models/config.json --rest_port 8000
     devices:
       - /dev/dri:/dev/dri
     healthcheck:

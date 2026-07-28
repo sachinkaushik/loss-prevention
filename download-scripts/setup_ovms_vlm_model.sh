@@ -8,10 +8,13 @@ MODEL_NAME="$1"
 PRECISION="$2"
 HUGGINGFACE_TOKEN="${3:-}"
 
-EXPORT_BASE_URL="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/0/demos/common/export_models"
+EXPORT_COMMIT="${OVMS_EXPORT_COMMIT:-78f8b30f82ed8dc53e6e0ba90476e480ec67e44c}"
+EXPORT_BASE_URL="https://raw.githubusercontent.com/openvinotoolkit/model_server/${EXPORT_COMMIT}/demos/common/export_models"
 EXPORT_SCRIPT="${SCRIPT_DIR}/export_model.py"
 EXPORT_REQUIREMENTS="${SCRIPT_DIR}/export_requirements.txt"
 EXPORT_VENV="${SCRIPT_DIR}/ovms-export-venv"
+EXPORT_SCRIPT_SHA256="${OVMS_EXPORT_SCRIPT_SHA256:-7e419913a1ce3e93aab01d9b66b2f8ac008a2a6bce29069fe2ecd6152b323b05}"
+EXPORT_REQUIREMENTS_SHA256="${OVMS_EXPORT_REQUIREMENTS_SHA256:-dedc9365ca182111fcd7478abc25a129ae70cefd6ff90b239209f3e5b11a57c2}"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
 TARGET_DEVICE_FILE=$(grep -E '^TARGET_DEVICE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"\r' || true)
 TARGET_DEVICE="${TARGET_DEVICE:-${VLM_DEVICE:-${TARGET_DEVICE_FILE:-GPU}}}"
@@ -25,6 +28,20 @@ check_model() {
     local model_path="$1"
 
     [[ -f "${model_path}/graph.pbtxt" ]] && ls "${model_path}"/*.xml >/dev/null 2>&1
+}
+
+verify_sha256() {
+    local file_path="$1"
+    local expected_sha256="$2"
+    local actual_sha256
+
+    actual_sha256=$(sha256sum "${file_path}" | awk '{print $1}')
+    if [[ "${actual_sha256}" != "${expected_sha256}" ]]; then
+        echo "[ERROR] SHA256 mismatch for ${file_path}" >&2
+        echo "[ERROR] expected=${expected_sha256}" >&2
+        echo "[ERROR] actual=${actual_sha256}" >&2
+        return 1
+    fi
 }
 
 patch_graph_paths() {
@@ -57,10 +74,13 @@ update_graph_pbtxt_device() {
 
 setup_python_env() {
     if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
-        echo "[INFO] Downloading OVMS export tools"
+        echo "[INFO] Downloading OVMS export tools at commit ${EXPORT_COMMIT}"
         curl -fsSL "${EXPORT_BASE_URL}/export_model.py" -o "${EXPORT_SCRIPT}"
         curl -fsSL "${EXPORT_BASE_URL}/requirements.txt" -o "${EXPORT_REQUIREMENTS}"
     fi
+
+    verify_sha256 "${EXPORT_SCRIPT}" "${EXPORT_SCRIPT_SHA256}"
+    verify_sha256 "${EXPORT_REQUIREMENTS}" "${EXPORT_REQUIREMENTS_SHA256}"
 
     if [[ ! -d "${EXPORT_VENV}" || ! -f "${EXPORT_VENV}/bin/pip" ]]; then
         echo "[INFO] Creating OVMS export virtual environment"
