@@ -102,7 +102,7 @@ services:
       - my_network
 
   ovms-vlm:
-    image: ${OVMS_IMAGE:-openvino/model_server:2025.4.1}
+    image: ${OVMS_IMAGE:-openvino/model_server:latest}
     container_name: ovms-vlm
     group_add:
       - video
@@ -110,8 +110,8 @@ services:
     environment:
       - OV_CACHE_DIR=/tmp/ov_cache
       - LOG_LEVEL=INFO
-      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
-      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
+      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
     volumes:
       - ../models/ovms-model:/models:ro
       - ${OVMS_CACHE_DIR:-../models/ovms-cache}:/tmp/ov_cache
@@ -122,7 +122,7 @@ services:
     devices:
       - /dev/dri:/dev/dri
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/v1/config | grep -q AVAILABLE"]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/v1/config | grep -q AVAILABLE" ]
       interval: 10s
       timeout: 10s
       retries: 100
@@ -168,8 +168,8 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - RABBITMQ_MANAGEMENT_PORT=15672
-      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
-      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
+      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
       - AMQP_NOTE=Use nc rabbitmq 5672 (curl is not valid for AMQP)
       - CONTAINER_RESULTS_PATH=${CONTAINER_RESULTS_PATH:-/app/results}
       - WORKLOAD_DIST=${WORKLOAD_DIST:-workload_to_pipeline.json}

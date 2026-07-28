@@ -13,7 +13,7 @@ EXPORT_SCRIPT="${SCRIPT_DIR}/export_model.py"
 EXPORT_REQUIREMENTS="${SCRIPT_DIR}/export_requirements.txt"
 EXPORT_VENV="${SCRIPT_DIR}/ovms-export-venv"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
-TARGET_DEVICE_FILE=$(grep -E '^TARGET_DEVICE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"\r')
+TARGET_DEVICE_FILE=$(grep -E '^TARGET_DEVICE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"\r' || true)
 TARGET_DEVICE="${TARGET_DEVICE:-${VLM_DEVICE:-${TARGET_DEVICE_FILE:-GPU}}}"
 if [[ "${TARGET_DEVICE}" == "null" || -z "${TARGET_DEVICE}" ]]; then
     TARGET_DEVICE="GPU"
