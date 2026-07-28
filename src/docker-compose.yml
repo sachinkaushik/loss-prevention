@@ -102,8 +102,10 @@ services:
       - my_network
 
   ovms-vlm:
-    image: ${OVMS_IMAGE:-openvino/model_server:latest}
+    image: ${OVMS_IMAGE:-openvino/model_server:2026.2.1}
     container_name: ovms-vlm
+    profiles:
+      - vlm
     group_add:
       - video
       - ${RENDER_GROUP_ID:-1002}
@@ -136,6 +138,8 @@ services:
   # --- main services ---
   lp-vlm-workload-handler:
     container_name: lp-vlm-workload-handler
+    profiles:
+      - vlm
     build:
       context: ../lp-vlm/src
       dockerfile: Dockerfile.consumer
@@ -206,6 +210,8 @@ services:
 
   vlm-pipeline-runner:
     container_name: vlm-pipeline-runner
+    profiles:
+      - vlm
     image: intel/pipeline-runner-lp:${LP_TAG}
     #user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     shm_size: '512m'

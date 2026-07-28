@@ -3,27 +3,36 @@
 
 .PHONY: update-submodules download-models download-samples download-sample-videos build-assets-downloader run-assets-downloader build-pipeline-runner run-loss-prevention run-lp down-lp clean-images clean-containers clean-all clean-project-images validate-config validate-camera-config validate-all-configs check-models check-device check-env show-config help logs-vlm logs-all restart-vlm check-model test-api status
 -include .env
-export
 
 
-HTTP_PROXY := $(or $(HTTP_PROXY),$(http_proxy))
-HTTPS_PROXY := $(or $(HTTPS_PROXY),$(https_proxy))
+HTTP_PROXY ?= $(or $(HTTP_PROXY),$(http_proxy))
+HTTPS_PROXY ?= $(or $(HTTPS_PROXY),$(https_proxy))
+HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 export HTTP_PROXY
 export HTTPS_PROXY
-
-
-export PWD=$(shell pwd)
-HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
-export VLM_DEVICE ?= CPU
+PWD ?= $(shell pwd)
+export PWD
+LP_TAG ?= $(shell cat VERSION)
+export LP_TAG
+VLM_DEVICE ?= CPU
+export VLM_DEVICE
 TARGET_DEVICE ?= $(VLM_DEVICE)
-export VLM_SERVICE_PORT ?= 8000
-export LP_BASE_DIR=$(PWD)
-export LLM_BASE_DIR=$(PWD)/models/ovms-model
-export MINIO_API_HOST_PORT=4000
-export MINIO_CONSOLE_HOST_PORT=4001
-export LP_IP=$(HOST_IP)
-export LOCAL_UID=$(id -u)
-export LOCAL_GID=$(id -g)
+VLM_SERVICE_PORT ?= 8000
+export VLM_SERVICE_PORT
+LP_BASE_DIR ?= $(PWD)
+export LP_BASE_DIR
+LLM_BASE_DIR ?= $(PWD)/models/ovms-model
+export LLM_BASE_DIR
+MINIO_API_HOST_PORT ?= 4000
+export MINIO_API_HOST_PORT
+MINIO_CONSOLE_HOST_PORT ?= 4001
+export MINIO_CONSOLE_HOST_PORT
+LP_IP ?= $(HOST_IP)
+export LP_IP
+LOCAL_UID ?= $(shell id -u)
+export LOCAL_UID
+LOCAL_GID ?= $(shell id -g)
+export LOCAL_GID
 # Default values for benchmark
 PIPELINE_COUNT ?= 1
 INIT_DURATION ?= 30
@@ -44,15 +53,18 @@ STREAM_LOOP ?= true
 
 # OVMS and VLM defaults
 VLM_BACKEND ?= ovms
+export VLM_BACKEND
 OVMS_ENDPOINT ?= http://ovms-vlm:8000
+export OVMS_ENDPOINT
 OVMS_MODEL_NAME ?= Qwen/Qwen2.5-VL-7B-Instruct
-OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:latest,openvino/model_server:latest-gpu)
+export OVMS_MODEL_NAME
+OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:2026.2.1,openvino/model_server:2026.2.1-gpu)
+export OVMS_IMAGE
 OVMS_HOST_PORT ?= 8002
+export OVMS_HOST_PORT
 
 
 TAG ?= latest
-LP_TAG = $(shell cat VERSION)
-export LP_TAG
 RENDER_MODE ?=0
 REGISTRY ?= true
 # Registry image references
@@ -245,9 +257,9 @@ run: validate_workload_mapping download-sample-videos
 	    [ -f $$LOG_FILE ] || touch $$LOG_FILE
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "##############Using registry mode - fetching pipeline runner..."; \
-		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
 	else \
-		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
 	fi
 
 run-render-mode: validate_workload_mapping download-sample-videos
@@ -268,11 +280,11 @@ run-render-mode: validate_workload_mapping download-sample-videos
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "##############Using registry mode - fetching pipeline runner..."; \
 		mkdir -p results results/vlm-results; \
-		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1  LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
 	else \
 		docker compose -f src/$(DOCKER_COMPOSE) build; \
 		mkdir -p results results/vlm-results; \
-		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
 	fi	
 	$(MAKE) clean-images
 
