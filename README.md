@@ -87,19 +87,7 @@ Push item-recognition accuracy beyond traditional CV with a **local Large Vision
 ## How to think about performance & stream density
 The metrics that matter: **FPS, end-to-end latency, CPU/GPU/NPU utilization, power, and stream density** (for GenAI/LVLM use cases also **TTFT** and **token throughput**).
 
-- **Stream density = the most concurrent streams a box sustains at a target FPS.** Because an LP lane is **multi-camera** (six cameras at potentially different frame-rate needs), density is best read as **use-case instances** — “how many shopping lanes with this use case running per box” — judging **each camera against its own FPS target** (use-case density, not a raw stream count).
-- **Implementation scope note:** the stream-density behaviors below are implemented in the `performance-tools` submodule (`benchmark-scripts/stream_density.py`). This repo provides the camera config JSON inputs (including `targetFps`) used by that logic.
-- **Per-camera target FPS (`targetFps`) support (optional key):** in `camera_to_workload_*.json`, you can add `lane_config.cameras[].targetFps` per camera when you want per-stream targets. If you remove this key (or set it to an invalid/non-positive value), stream density falls back to global `TARGET_FPS`.
-- **Why this value matters:** `targetFps` is the expected sustained per-camera processing rate used to decide stream pass/fail and density scaling. Lower values generally allow higher stream density (more concurrent streams), while higher values demand more compute per stream and can reduce density. Set it based on workload criticality and source FPS.
-- **Per-stream pass/fail comparison:** pass/fail is evaluated per stream (not one global threshold):
-  - pass threshold = `stream_target_fps * PASS_TOLERANCE_RATIO`
-  - fail threshold = `pass threshold - HYSTERESIS_FPS`
-- **Increment behavior:**
-  - If `PIPELINE_INC` is provided, that hint is used.
-  - Otherwise, increments are estimated from observed per-stream FPS and the **mean** target FPS across streams, then adjusted conservatively by the benchmark logic.
-- **Debug key for visibility:** set `STREAM_DENSITY_DEBUG=1` to print the per-stream target map, pass/fail thresholds, passing/failing streams, and mean target FPS used by increment estimation.
-- **Camera config cache behavior:** stream-density caches parsed camera-target mappings using `(config_path, file_mtime)`. This avoids re-parsing the JSON every iteration and automatically refreshes when the file changes.
-- **Test coverage location:** stream-density unit tests for this behavior are in the `performance-tools` repo (`benchmark-scripts/stream_density_test.py`), including mixed `targetFps` values and missing camera-config fallback scenarios.
+-  **Stream density = the most concurrent streams a box sustains at a target FPS.** Because an LP lane is **multi-camera** (six cameras at potentially different frame-rate needs), density is best read as **use-case instances**f — “how many shopping lanes with this use case running per box” — judging **each camera against its own FPS target** (use-case density, not a raw stream count).
 - **Reading the result:** a stream cannot sustain more than its source FPS — any per-stream reading **above** the source rate is a measurement artifact (catch-up burst), not real throughput.
 - **How we measure it:** we ramp the number of streams, let each step settle, then read the sustained per-stream FPS against the target to find the most streams that hold it. This method has **known limitations** (a short measurement window can misread under noise) and we’re **actively improving it** toward a more robust steady-state measurement. ⚙️ *engineering: align on the final method.*
 
