@@ -23,7 +23,7 @@ export LOCAL_UID=$(id -u)
 export LOCAL_GID=$(id -g)
 # Default values for benchmark
 PIPELINE_COUNT ?= 1
-INIT_DURATION ?= 30
+INIT_DURATION ?= 120
 TARGET_FPS ?= 14.95
 CONTAINER_NAMES ?= gst0
 DENSITY_INCREMENT ?= 1
