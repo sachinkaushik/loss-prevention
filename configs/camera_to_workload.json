@@ -1,7 +1,10 @@
 {
+  "_notes": {
+    "targetFps": "Optional per-camera key. Add lane_config.cameras[].targetFps to set per-stream target FPS. If omitted, stream density falls back to global TARGET_FPS."
+  },
   "lane_config": {
-    "cameras": [  
-      { 
+    "cameras": [
+      {
         "camera_id": "cam1",
         "fps": 15,
         "width": 1080,
@@ -15,9 +18,9 @@
           "y2": 1340
         }
       },
-      { 
-        "camera_id": "cam2", 
-         "fps": 15,
+      {
+        "camera_id": "cam2",
+        "fps": 15,
         "width": 1080,
         "height": 1920,
         "fileSrc":"hidden-items-product-switching-32658426.mp4|https://www.pexels.com/download/video/32658426", 
@@ -28,12 +31,12 @@
           "x2": 1060,
           "y2": 1340
         }
-      },   
-      { 
-        "camera_id": "cam3", 
+      },
+      {
+        "camera_id": "cam3",
+        "fps": 15,
         "width": 1920,
         "height": 1080,
-        "fps": 15,
         "fileSrc":"fake-scan-detection-32658425.mp4|https://www.pexels.com/download/video/32658425", 
         "workloads": ["fake_scan_detection"],
         "region_of_interest": {
@@ -43,7 +46,7 @@
           "y2": 1085
         }
       },
-      { 
+      {
         "camera_id": "cam4",
         "fps": 15,
         "width": 1080,
@@ -57,9 +60,9 @@
           "y2": 1340
         }
       },
-      { 
-        "camera_id": "cam5", 
-         "fps": 15,
+      {
+        "camera_id": "cam5",
+        "fps": 15,
         "width": 1080,
         "height": 1920,
         "fileSrc":"hidden-items-product-switching-32658426.mp4|https://www.pexels.com/download/video/32658426", 
@@ -71,9 +74,9 @@
           "y2": 1340
         }
       },
-      { 
-        "camera_id": "cam6", 
-         "fps": 15,
+      {
+        "camera_id": "cam6",
+        "fps": 15,
         "width": 1080,
         "height": 1920,
         "fileSrc":"face-detection-3249935.mp4|https://www.pexels.com/download/video/3249935", 

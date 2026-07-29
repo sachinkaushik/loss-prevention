@@ -1,7 +1,10 @@
 {
+  "_notes": {
+    "targetFps": "Optional per-camera key. Add lane_config.cameras[].targetFps to set per-stream target FPS. If omitted, stream density falls back to global TARGET_FPS."
+  },
   "lane_config": {
-    "cameras": [     
-      { 
+    "cameras": [
+      {
         "camera_id": "cam1",
         "fps": 15,
         "width": 1080,
