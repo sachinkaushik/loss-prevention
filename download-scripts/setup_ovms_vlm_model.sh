@@ -8,38 +8,67 @@ MODEL_NAME="$1"
 PRECISION="$2"
 HUGGINGFACE_TOKEN="${3:-}"
 
-EXPORT_COMMIT="${OVMS_EXPORT_COMMIT:-78f8b30f82ed8dc53e6e0ba90476e480ec67e44c}"
-EXPORT_BASE_URL="https://raw.githubusercontent.com/openvinotoolkit/model_server/${EXPORT_COMMIT}/demos/common/export_models"
-EXPORT_SCRIPT="${SCRIPT_DIR}/export_model.py"
-EXPORT_REQUIREMENTS="${SCRIPT_DIR}/export_requirements.txt"
-EXPORT_VENV="${SCRIPT_DIR}/ovms-export-venv"
-EXPORT_SCRIPT_SHA256="${OVMS_EXPORT_SCRIPT_SHA256:-7e419913a1ce3e93aab01d9b66b2f8ac008a2a6bce29069fe2ecd6152b323b05}"
-EXPORT_REQUIREMENTS_SHA256="${OVMS_EXPORT_REQUIREMENTS_SHA256:-dedc9365ca182111fcd7478abc25a129ae70cefd6ff90b239209f3e5b11a57c2}"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
 TARGET_DEVICE_FILE=$(grep -E '^TARGET_DEVICE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"\r' || true)
 TARGET_DEVICE="${TARGET_DEVICE:-${VLM_DEVICE:-${TARGET_DEVICE_FILE:-GPU}}}"
 if [[ "${TARGET_DEVICE}" == "null" || -z "${TARGET_DEVICE}" ]]; then
     TARGET_DEVICE="GPU"
 fi
-CACHE_SIZE="${OVMS_CACHE_SIZE:-4}"
+CACHE_SIZE_FILE=$(grep -E '^CACHE_SIZE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d'=' -f2- | tr -d '"\r' || true)
+CACHE_SIZE="${OVMS_CACHE_SIZE:-${CACHE_SIZE_FILE:-4}}"
+if ! echo "${CACHE_SIZE}" | grep -qE '^[0-9]+$'; then
+    echo "[WARN] CACHE_SIZE must be a non-negative integer (got '${CACHE_SIZE}'). Using default 4."
+    CACHE_SIZE=4
+fi
 TARGET_PATH="${OVMS_MODELS_DIR}/${MODEL_NAME}"
+
+validate_model_xml() {
+    local model_path="$1"
+    local found_valid=0
+
+    for xml_file in "${model_path}"/*.xml; do
+        [[ -e "${xml_file}" ]] || continue
+
+        if [[ ! -s "${xml_file}" ]]; then
+            echo "[WARN] Model XML is empty: ${xml_file}"
+            return 1
+        fi
+
+        if [[ "$(head -c 5 "${xml_file}" 2>/dev/null || true)" != "<?xml" ]]; then
+            echo "[WARN] Model XML looks corrupt (invalid header): ${xml_file}"
+            return 1
+        fi
+
+        found_valid=1
+    done
+
+    [[ "${found_valid}" -eq 1 ]]
+}
+
+check_memory_for_export() {
+    local recommended_gb=64
+    local total_gb=0
+
+    if [[ -f /proc/meminfo ]]; then
+        total_gb=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+    fi
+
+    if [[ "${total_gb}" -gt 0 && "${total_gb}" -lt "${recommended_gb}" ]]; then
+        echo "[WARN] System RAM is ${total_gb} GB; ${recommended_gb} GB is recommended for safer VLM export."
+        echo "[WARN] If OVMS reports model-read errors, retry export on a higher-memory machine."
+    fi
+}
 
 check_model() {
     local model_path="$1"
 
-    [[ -f "${model_path}/graph.pbtxt" ]] && ls "${model_path}"/*.xml >/dev/null 2>&1
-}
+    if [[ ! -d "${model_path}" ]]; then
+        return 1
+    fi
 
-verify_sha256() {
-    local file_path="$1"
-    local expected_sha256="$2"
-    local actual_sha256
-
-    actual_sha256=$(sha256sum "${file_path}" | awk '{print $1}')
-    if [[ "${actual_sha256}" != "${expected_sha256}" ]]; then
-        echo "[ERROR] SHA256 mismatch for ${file_path}" >&2
-        echo "[ERROR] expected=${expected_sha256}" >&2
-        echo "[ERROR] actual=${actual_sha256}" >&2
+    if [[ -f "${model_path}/graph.pbtxt" ]] && ls "${model_path}"/*.xml >/dev/null 2>&1; then
+        validate_model_xml "${model_path}"
+    else
         return 1
     fi
 }
@@ -72,49 +101,148 @@ update_graph_pbtxt_device() {
     fi
 }
 
-setup_python_env() {
-    if [[ ! -f "${EXPORT_SCRIPT}" ]]; then
-        echo "[INFO] Downloading OVMS export tools at commit ${EXPORT_COMMIT}"
-        curl -fsSL "${EXPORT_BASE_URL}/export_model.py" -o "${EXPORT_SCRIPT}"
-        curl -fsSL "${EXPORT_BASE_URL}/requirements.txt" -o "${EXPORT_REQUIREMENTS}"
+migrate_legacy_model() {
+    local target_path="$1"
+
+    if [[ -d "${target_path}" ]]; then
+        return 0
     fi
 
-    verify_sha256 "${EXPORT_SCRIPT}" "${EXPORT_SCRIPT_SHA256}"
-    verify_sha256 "${EXPORT_REQUIREMENTS}" "${EXPORT_REQUIREMENTS_SHA256}"
+    local model_leaf="${MODEL_NAME##*/}"
+    local legacy_paths=(
+        "${OVMS_MODELS_DIR}/${model_leaf}-ov-int8"
+        "${OVMS_MODELS_DIR}/${model_leaf}-int8-ov"
+        "${OVMS_MODELS_DIR}/Qwen/${model_leaf}-ov-int8"
+    )
 
-    if [[ ! -d "${EXPORT_VENV}" || ! -f "${EXPORT_VENV}/bin/pip" ]]; then
-        echo "[INFO] Creating OVMS export virtual environment"
-        python3 -m venv "${EXPORT_VENV}" --clear
+    local legacy_path
+    for legacy_path in "${legacy_paths[@]}"; do
+        if check_model "${legacy_path}"; then
+            echo "[INFO] Legacy OVMS model found at ${legacy_path}. Migrating to ${target_path}"
+            mkdir -p "$(dirname "${target_path}")"
+            cp -r "${legacy_path}" "${target_path}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+resolve_ov_source_model() {
+    local name="$1"
+    local precision="$2"
+    local precision_lc
+
+    if [[ -n "${OV_SOURCE_MODEL:-}" ]]; then
+        echo "${OV_SOURCE_MODEL}"
+        return 0
     fi
 
-    # shellcheck disable=SC1091
-    source "${EXPORT_VENV}/bin/activate"
-    pip install -q --upgrade pip
-    pip install -q -r "${EXPORT_REQUIREMENTS}"
+    if [[ "${name}" == OpenVINO/* ]]; then
+        echo "${name}"
+        return 0
+    fi
+
+    precision_lc=$(echo "${precision}" | tr '[:upper:]' '[:lower:]')
+    case "${precision_lc}" in
+        int8|fp16|int4)
+            echo "OpenVINO/${name##*/}-${precision_lc}-ov"
+            ;;
+        *)
+            echo "[ERROR] Unsupported VLM precision '${precision}'. Use one of: int8, fp16, int4 or set OV_SOURCE_MODEL explicitly." >&2
+            return 1
+            ;;
+    esac
+}
+
+download_ov_model_snapshot() {
+    local source_model="$1"
+    local target_path="$2"
+
+    export HF_TOKEN="${HUGGINGFACE_TOKEN}"
+    export HUGGING_FACE_HUB_TOKEN="${HUGGINGFACE_TOKEN}"
+    export HF_HUB_DISABLE_SYMLINKS_WARNING=1
+
+    echo "[INFO] Downloading OV model snapshot: ${source_model}"
+    python3 - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+
+source_model = os.environ["OV_SOURCE_MODEL_TO_DOWNLOAD"]
+target_path = os.environ["OV_TARGET_PATH"]
+token = os.environ.get("HUGGINGFACE_TOKEN") or None
+
+snapshot_download(
+    repo_id=source_model,
+    local_dir=target_path,
+    token=token,
+    local_dir_use_symlinks=False,
+)
+PY
+}
+
+generate_graph_pbtxt() {
+    local graph_file="$1"
+    local target_device="$2"
+    local cache_size="$3"
+
+    cat > "${graph_file}" <<EOF
+input_stream: "HTTP_REQUEST_PAYLOAD:input"
+output_stream: "HTTP_RESPONSE_PAYLOAD:output"
+
+node: {
+  name: "LLMExecutor"
+  calculator: "HttpLLMCalculator"
+  input_stream: "LOOPBACK:loopback"
+  input_stream: "HTTP_REQUEST_PAYLOAD:input"
+  input_side_packet: "LLM_NODE_RESOURCES:llm"
+  output_stream: "LOOPBACK:loopback"
+  output_stream: "HTTP_RESPONSE_PAYLOAD:output"
+  input_stream_info: {
+    tag_index: 'LOOPBACK:0',
+    back_edge: true
+  }
+  node_options: {
+      [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
+          pipeline_type: VLM_CB,
+          models_path: "./",
+          plugin_config: '{}',
+          enable_prefix_caching:  true,
+          cache_size: ${cache_size},
+          max_num_batched_tokens: 8192,
+          max_num_seqs: 4,
+          device: "${target_device}",
+      }
+  }
+  input_stream_handler {
+    input_stream_handler: "SyncSetInputStreamHandler",
+    options {
+      [mediapipe.SyncSetInputStreamHandlerOptions.ext] {
+        sync_set {
+          tag_index: "LOOPBACK:0"
+        }
+      }
+    }
+  }
+}
+EOF
 }
 
 export_model() {
-    export HF_TOKEN="${HUGGINGFACE_TOKEN}"
-    export HUGGING_FACE_HUB_TOKEN="${HUGGINGFACE_TOKEN}"
+    local source_model
+    source_model=$(resolve_ov_source_model "${MODEL_NAME}" "${PRECISION}")
 
-    local target_device_args=()
-    if [[ -n "${TARGET_DEVICE}" && "${TARGET_DEVICE}" != "CPU" ]]; then
-        target_device_args=(--target_device "${TARGET_DEVICE}")
+    if [[ ! -d "${TARGET_PATH}" || -z "$(ls -A "${TARGET_PATH}" 2>/dev/null || true)" ]]; then
+        check_memory_for_export
+        mkdir -p "${TARGET_PATH}"
+        export OV_SOURCE_MODEL_TO_DOWNLOAD="${source_model}"
+        export OV_TARGET_PATH="${TARGET_PATH}"
+        download_ov_model_snapshot "${source_model}" "${TARGET_PATH}"
+    else
+        echo "[INFO] OV model directory already has content at ${TARGET_PATH}, skipping snapshot download"
     fi
 
-    echo "[INFO] Exporting ${MODEL_NAME} for OVMS (precision=${PRECISION}, device=${TARGET_DEVICE:-AUTO})"
-    python "${EXPORT_SCRIPT}" text_generation \
-        --source_model "${MODEL_NAME}" \
-        --weight-format "${PRECISION}" \
-        --pipeline_type VLM_CB \
-        "${target_device_args[@]}" \
-        --cache_size "${CACHE_SIZE}" \
-        --max_num_seqs 4 \
-        --max_num_batched_tokens 8192 \
-        --enable_prefix_caching True \
-        --config_file_path "${OVMS_MODELS_DIR}/config.json" \
-        --model_repository_path "${OVMS_MODELS_DIR}" \
-        --model_name "${MODEL_NAME}"
+    generate_graph_pbtxt "${TARGET_PATH}/graph.pbtxt" "${TARGET_DEVICE}" "${CACHE_SIZE}"
 }
 
 generate_ovms_config() {
@@ -142,7 +270,14 @@ if check_model "${TARGET_PATH}"; then
     exit 0
 fi
 
-setup_python_env
+if migrate_legacy_model "${TARGET_PATH}"; then
+    echo "[INFO] Using migrated legacy model at ${TARGET_PATH}."
+    patch_graph_paths "${TARGET_PATH}/graph.pbtxt"
+    update_graph_pbtxt_device "${TARGET_PATH}/graph.pbtxt" "${TARGET_DEVICE}"
+    generate_ovms_config
+    exit 0
+fi
+
 export_model
 
 if ! check_model "${TARGET_PATH}"; then
