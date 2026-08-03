@@ -102,7 +102,7 @@ services:
       - my_network
 
   ovms-vlm:
-    image: ${OVMS_IMAGE:-openvino/model_server:2026.2.1}
+    image: ${OVMS_IMAGE:-openvino/model_server:2026.2.1-gpu}
     container_name: ovms-vlm
     profiles:
       - vlm
