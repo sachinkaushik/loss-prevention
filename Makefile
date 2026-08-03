@@ -126,6 +126,7 @@ run-model-downloader:
 		-e HTTPS_PROXY=${HTTPS_PROXY} \
 		-e http_proxy=${HTTP_PROXY} \
 		-e https_proxy=${HTTPS_PROXY} \
+		-e REGISTRY=${REGISTRY} \
 		-e LOCAL_UID=$(shell id -u) \
 		-e LOCAL_GID=$(shell id -g) \
 		-e MODELS_DIR=/workspace/models \
@@ -137,6 +138,7 @@ run-model-downloader:
 		-v "$(shell pwd)/configs:/workspace/configs" \
 		-v "$(shell pwd)/download-scripts:/workspace/scripts" \
 		$(REGISTRY_MODEL_DOWNLOADER) \
+		/bin/bash -lc 'if [ "$$REGISTRY" = "false" ]; then chmod +x /workspace/scripts/model-downloader.sh && /workspace/scripts/model-downloader.sh; else :; fi'
 	@echo "assets downloader completed"
 
 download-sample-videos: | validate-camera-config
@@ -217,9 +219,11 @@ run: validate_workload_mapping download-sample-videos
 	    [ -f $$LOG_FILE ] || touch $$LOG_FILE
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "##############Using registry mode - fetching pipeline runner..."; \
-		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
+		SCALE_LP_RUNNER=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo "--scale lp-pipeline-runner=0"; fi); \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d $$SCALE_LP_RUNNER; \
 	else \
-		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
+		SCALE_LP_RUNNER=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo "--scale lp-pipeline-runner=0"; fi); \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d $$SCALE_LP_RUNNER; \
 	fi
 
 run-render-mode: validate_workload_mapping download-sample-videos
@@ -240,11 +244,13 @@ run-render-mode: validate_workload_mapping download-sample-videos
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "##############Using registry mode - fetching pipeline runner..."; \
 		mkdir -p results results/vlm-results; \
-		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
+		SCALE_LP_RUNNER=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo "--scale lp-pipeline-runner=0"; fi); \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d $$SCALE_LP_RUNNER; \
 	else \
 		docker compose -f src/$(DOCKER_COMPOSE) build; \
 		mkdir -p results results/vlm-results; \
-		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
+		SCALE_LP_RUNNER=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo "--scale lp-pipeline-runner=0"; fi); \
+		COMPOSE_PROFILES=$$(if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then echo vlm; fi) LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) RENDER_MODE=1 LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) CAMERA_STREAM=$(CAMERA_STREAM) WORKLOAD_DIST=$(WORKLOAD_DIST) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d $$SCALE_LP_RUNNER; \
 	fi	
 	$(MAKE) clean-images
 
