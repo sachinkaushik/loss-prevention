@@ -1,5 +1,7 @@
 import base64
 from io import BytesIO
+from typing import Optional
+import time
 
 import numpy as np
 import requests
@@ -21,7 +23,9 @@ class OVMSVLMClient:
         img_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return f"data:image/jpeg;base64,{img_b64}"
 
-    def generate(self, prompt, images=None):
+    def generate(self, prompt, images=None, generation_config=None, unique_id: Optional[str] = None):
+        _ = generation_config
+        _ = unique_id
         images = images or []
         content = [{"type": "text", "text": prompt}]
 
@@ -40,6 +44,7 @@ class OVMSVLMClient:
             "temperature": self.temperature,
         }
 
+        request_start = time.time()
         response = requests.post(
             self.endpoint,
             headers={"Content-Type": "application/json"},
@@ -49,10 +54,14 @@ class OVMSVLMClient:
         response.raise_for_status()
 
         payload = response.json()
+        total_latency = time.time() - request_start
         text = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+        usage = payload.get("usage", {})
 
         class GenerationResult:
-            def __init__(self, generated_text):
+            def __init__(self, generated_text, usage_data, latency):
                 self.texts = [generated_text]
+                self.usage = usage_data
+                self.total_latency = latency
 
-        return GenerationResult(text)
+        return GenerationResult(text, usage, total_latency)
