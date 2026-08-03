@@ -68,10 +68,6 @@ OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:2026.2.1
 export OVMS_IMAGE
 OVMS_HOST_PORT ?= 8002
 export OVMS_HOST_PORT
-RABBITMQ_USER ?= guest
-export RABBITMQ_USER
-RABBITMQ_PASSWORD ?= guest
-export RABBITMQ_PASSWORD
 
 
 TAG ?= latest
