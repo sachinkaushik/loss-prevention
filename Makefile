@@ -129,7 +129,9 @@ run-model-downloader:
 		-e HF_HUB_DOWNLOAD_TIMEOUT=600 \
 		-v "$(shell pwd)/models:/workspace/models" \
 		-v "$(shell pwd)/configs:/workspace/configs" \
-		$(REGISTRY_MODEL_DOWNLOADER)
+		-v "$(shell pwd)/download-scripts:/workspace/scripts" \
+		$(REGISTRY_MODEL_DOWNLOADER) \
+		/bin/bash /workspace/scripts/model-downloader.sh
 	@echo "assets downloader completed"
 
 download-sample-videos: | validate-camera-config
