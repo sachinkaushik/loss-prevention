@@ -33,6 +33,12 @@ LOCAL_UID ?= $(shell id -u)
 export LOCAL_UID
 LOCAL_GID ?= $(shell id -g)
 export LOCAL_GID
+VIDEO_GROUP_ID ?= $(shell getent group video 2>/dev/null | cut -d: -f3 || echo 44)
+export VIDEO_GROUP_ID
+RENDER_GROUP_ID ?= $(shell getent group render 2>/dev/null | cut -d: -f3 || echo 992)
+export RENDER_GROUP_ID
+USER_GROUP_ID ?= $(shell id -g)
+export USER_GROUP_ID
 # Default values for benchmark
 PIPELINE_COUNT ?= 1
 INIT_DURATION ?= 30
@@ -62,6 +68,10 @@ OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:2026.2.1
 export OVMS_IMAGE
 OVMS_HOST_PORT ?= 8002
 export OVMS_HOST_PORT
+RABBITMQ_USER ?= guest
+export RABBITMQ_USER
+RABBITMQ_PASSWORD ?= guest
+export RABBITMQ_PASSWORD
 
 
 TAG ?= latest

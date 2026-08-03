@@ -35,8 +35,8 @@ services:
       - "5672:5672" # AMQP port
       - "15672:15672" # Management UI port
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     healthcheck:
       test: [ "CMD", "rabbitmq-diagnostics", "status" ]
       interval: 10s
@@ -108,7 +108,7 @@ services:
       - vlm
     group_add:
       - video
-      - ${RENDER_GROUP_ID:-1002}
+      - ${RENDER_GROUP_ID:-992}
     environment:
       - OV_CACHE_DIR=/tmp/ov_cache
       - LOG_LEVEL=INFO
@@ -153,7 +153,7 @@ services:
     group_add:
       - ${USER_GROUP_ID:-1000}
       - ${VIDEO_GROUP_ID:-44}
-      - ${RENDER_GROUP_ID:-1002}
+      - ${RENDER_GROUP_ID:-992}
     environment:
       - VLM_WORKLOAD_ENABLED=${LP_VLM_WORKLOAD_ENABLED}
       - VLM_BACKEND=${VLM_BACKEND:-ovms}
@@ -164,7 +164,7 @@ services:
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
       - RABBITMQ_USER=${RABBITMQ_USER}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
       - LP_IP=${LP_IP}
@@ -229,8 +229,8 @@ services:
       - LP_IP=${LP_IP}
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - RABBITMQ_USER=${RABBITMQ_USER}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - THRESHOLD=${THRESHOLD:-16}
       - DISPLAY=${DISPLAY:-:0}
       - RENDER_MODE=${RENDER_MODE:-0}
@@ -306,8 +306,8 @@ services:
       - ROI_COORDINATES=${ROI_COORDINATES}
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-      - RABBITMQ_USER=${RABBITMQ_USER}
-      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - THRESHOLD=${THRESHOLD:-7}
       - LP_BASE_DIR=${LP_BASE_DIR}
       - DISPLAY=${DISPLAY:-:0}
