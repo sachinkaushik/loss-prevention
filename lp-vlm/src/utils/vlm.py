@@ -12,9 +12,9 @@ from utils.config import OVMS_ENDPOINT, OVMS_MODEL_NAME, logger
 from utils.prompts import *
 from utils.ovms_client import OVMSVLMClient
 from vlm_metrics_logger import (
+    get_logger,
     log_start_time,
     log_end_time,
-    log_custom_event,
     log_ovms_performance_metric,
 )
 
@@ -87,19 +87,21 @@ def call_vlm(
 ) -> Tuple[bool, Dict[str, Any], str]:
     """Call the Vision Language Model to analyze frames using OVMS backend."""
     application_name = "OVMS_VLM"
+    metrics_logger = get_logger()
+
     try:
         _ = seed  # kept for API compatibility with existing callers
         start_time = time.time()
         unique_id = f"{use_case or 'default'}_{int(start_time * 1000)}"
         log_start_time(application_name, unique_id)
-        log_custom_event("ovms_vlm_call_started", application_name, unique_id, use_case=use_case or "default")
+        metrics_logger.log_custom_event("ovms_vlm_call_started", application_name, unique_id, use_case=use_case or "default")
         logger.info("Making ovms VLM call...")
         
         # Extract prompt and images
         prompt, images = extract_prompt_and_images(frame_records, use_case)            
         
         if not images and use_case != "decision_agent":
-            log_custom_event("ovms_vlm_call_failure", application_name, unique_id, reason="no_images")
+            metrics_logger.log_custom_event("ovms_vlm_call_failure", application_name, unique_id, reason="no_images")
             log_end_time(application_name, unique_id)
             return False, {}, "No images extracted from frame_records"
 
@@ -124,7 +126,7 @@ def call_vlm(
             "throughput_mean_sec": throughput_mean,
         }
         log_ovms_performance_metric(application_name, vlm_metrics_result)
-        log_custom_event(
+        metrics_logger.log_custom_event(
             "ovms_vlm_request",
             application_name,
             unique_id,
@@ -148,28 +150,28 @@ def call_vlm(
                 try:
                     parsed = json.loads(json_str)
                     logger.info(f"vlm Script - [call_vlm] Successfully parsed JSON from extracted string: {parsed}")
-                    log_custom_event("ovms_vlm_call_success", application_name, unique_id, response_format="json_array_extracted")
+                    metrics_logger.log_custom_event("ovms_vlm_call_success", application_name, unique_id, response_format="json_array_extracted")
                     log_end_time(application_name, unique_id)
                     return True, parsed, ""
                 except Exception as e:
                     logger.error(f"vlm Script - [call_vlm] - Failed to parse JSON from extracted string: {e}")
-                    log_custom_event("ovms_vlm_parse_failure", application_name, unique_id, stage="json_array_extracted", error=str(e))
+                    metrics_logger.log_custom_event("ovms_vlm_parse_failure", application_name, unique_id, stage="json_array_extracted", error=str(e))
                     log_end_time(application_name, unique_id)
                     return False, {}, f"Failed to parse JSON: {e}; content: {raw_text}"
             
             # If no JSON array, try to parse as generic response
             try:
                 parsed = json.loads(raw_text)
-                log_custom_event("ovms_vlm_call_success", application_name, unique_id, response_format="json_raw")
+                metrics_logger.log_custom_event("ovms_vlm_call_success", application_name, unique_id, response_format="json_raw")
                 log_end_time(application_name, unique_id)
                 return True, parsed, ""
             except Exception as e:
                 logger.error(f"vlm Script - [call_vlm] - Failed to parse JSON from raw text: {e}")
-                log_custom_event("ovms_vlm_parse_failure", application_name, unique_id, stage="json_raw", error=str(e))
+                metrics_logger.log_custom_event("ovms_vlm_parse_failure", application_name, unique_id, stage="json_raw", error=str(e))
                 log_end_time(application_name, unique_id)
                 return True, {"raw_response": raw_text}, ""
         else:
-            log_custom_event("ovms_vlm_call_failure", application_name, unique_id, reason="no_output")
+            metrics_logger.log_custom_event("ovms_vlm_call_failure", application_name, unique_id, reason="no_output")
             log_end_time(application_name, unique_id)
             return False, {}, "No output from VLM model"
     
@@ -177,7 +179,7 @@ def call_vlm(
         error_msg = f"Unexpected error: {str(e)}"
         logger.error(error_msg)
         fallback_unique_id = f"{use_case or 'default'}_error"
-        log_custom_event("ovms_vlm_call_exception", application_name, fallback_unique_id, error=error_msg)
+        metrics_logger.log_custom_event("ovms_vlm_call_exception", application_name, fallback_unique_id, error=error_msg)
         log_end_time(application_name, fallback_unique_id)
         return False, None, error_msg
 

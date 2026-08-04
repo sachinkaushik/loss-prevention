@@ -104,14 +104,17 @@ services:
   ovms-vlm:
     image: ${OVMS_IMAGE:-openvino/model_server:2026.2.1-gpu}
     container_name: ovms-vlm
-    profiles:
-      - vlm
     group_add:
       - video
-      - ${RENDER_GROUP_ID:-992}
+      - ${RENDER_GROUP_ID:-1002}
     environment:
       - OV_CACHE_DIR=/tmp/ov_cache
       - LOG_LEVEL=INFO
+      - VLM_WORKLOAD_ENABLED=${LP_VLM_WORKLOAD_ENABLED}
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - http_proxy=${http_proxy}
+      - https_proxy=${https_proxy}
       - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
       - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
     volumes:
@@ -138,8 +141,6 @@ services:
   # --- main services ---
   lp-vlm-workload-handler:
     container_name: lp-vlm-workload-handler
-    profiles:
-      - vlm
     build:
       context: ../lp-vlm/src
       dockerfile: Dockerfile.consumer
@@ -153,7 +154,7 @@ services:
     group_add:
       - ${USER_GROUP_ID:-1000}
       - ${VIDEO_GROUP_ID:-44}
-      - ${RENDER_GROUP_ID:-992}
+      - ${RENDER_GROUP_ID:-1002}
     environment:
       - VLM_WORKLOAD_ENABLED=${LP_VLM_WORKLOAD_ENABLED}
       - VLM_BACKEND=${VLM_BACKEND:-ovms}
@@ -210,8 +211,6 @@ services:
 
   vlm-pipeline-runner:
     container_name: vlm-pipeline-runner
-    profiles:
-      - vlm
     image: intel/pipeline-runner-lp:${LP_TAG}
     #user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     shm_size: '512m'

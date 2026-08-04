@@ -172,6 +172,7 @@ make consolidate-metrics && cat benchmark/metrics.csv # benchmark resutls
 
 #### 4 · LVLM-enhanced workload
 ```sh
+export OVMS_VLM=<...>
 export MINIO_ROOT_USER=<...> MINIO_ROOT_PASSWORD=<...>
 export RABBITMQ_USER=<...> RABBITMQ_PASSWORD=<...>
 export GATED_MODEL=true HUGGINGFACE_TOKEN=<...>      # gated model access
