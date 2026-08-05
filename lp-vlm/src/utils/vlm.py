@@ -86,7 +86,7 @@ def call_vlm(
     use_case: str = None,
 ) -> Tuple[bool, Dict[str, Any], str]:
     """Call the Vision Language Model to analyze frames using OVMS backend."""
-    application_name = "OVMS_VLM"
+    application_name = "USECASE_2"
     metrics_logger = get_logger()
 
     try:
