@@ -175,7 +175,10 @@ make consolidate-metrics && cat benchmark/metrics.csv # benchmark resutls
 export MINIO_ROOT_USER=<...> MINIO_ROOT_PASSWORD=<...>
 export RABBITMQ_USER=<...> RABBITMQ_PASSWORD=<...>
 export GATED_MODEL=true HUGGINGFACE_TOKEN=<...>      # gated model access
+
 make run-lp CAMERA_STREAM=camera_to_workload_vlm.json STREAM_LOOP=false
+
+make benchmark CAMERA_STREAM=camera_to_workload_vlm.json WORKLOAD_DIST=workload_to_pipeline_vlm.json        
 ```
 
 

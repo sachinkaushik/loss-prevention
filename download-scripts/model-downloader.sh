@@ -10,6 +10,13 @@ echo "[INFO] CONFIG_JSON in: $CONFIG_JSON"
 
 mkdir -p "$MODELS_PATH"
 
+ovms_model_ready() {
+    local model_name="$1"
+    local model_dir="$MODELS_PATH/ovms-model/$model_name"
+
+    [[ -f "$model_dir/graph.pbtxt" ]] && ls "$model_dir"/*.xml >/dev/null 2>&1
+}
+
 ############################################
 # MODE 1: JSON-driven (bulk download)
 ############################################
@@ -22,6 +29,7 @@ if [[ -n "${WORKLOAD_DIST:-}" && -f "$CONFIG_JSON" ]]; then
         if [[ "$TYPE" == "vlm" ]]; then
             # ---- VLM handling ----
             VLM_MODEL=$(jq -r '.vlm_model' <<< "$entry")
+            VLM_DEVICE=$(jq -r '.vlm_device // empty' <<< "$entry")
             VLM_PRECISION=$(jq -r '.vlm_precision // "int8"' <<< "$entry")
             MODEL=$(jq -r '.model' <<< "$entry")
             MODEL_PRECISION=$(jq -r '.precision // "FP16"' <<< "$entry")
@@ -29,11 +37,16 @@ if [[ -n "${WORKLOAD_DIST:-}" && -f "$CONFIG_JSON" ]]; then
             # Download VLM model
             export MODEL_NAME="$VLM_MODEL"
             export PRECISION="$VLM_PRECISION"
+            if [[ -n "$VLM_DEVICE" && "$VLM_DEVICE" != "null" ]]; then
+                export VLM_DEVICE
+            else
+                unset VLM_DEVICE || true
+            fi
 
             echo "[INFO] VLM | $MODEL_NAME | $PRECISION"
             
             # Skip if already exists
-            if find "$MODELS_PATH" -type f -path "*/$MODEL_NAME/*.xml" | grep -q "$MODEL_NAME.xml"; then
+            if ovms_model_ready "$MODEL_NAME"; then
                 echo "[INFO] VLM Model $MODEL_NAME already exists, skipping"
             else
                 bash "$SCRIPT_BASE_PATH/model-handler.sh"

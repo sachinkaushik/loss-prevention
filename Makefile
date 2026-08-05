@@ -1,26 +1,44 @@
 # Copyright © 2025 Intel Corporation. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-.PHONY: update-submodules download-models download-samples download-sample-videos build-assets-downloader run-assets-downloader build-pipeline-runner run-loss-prevention clean-images clean-containers clean-all clean-project-images validate-config validate-camera-config validate-all-configs check-models
+.PHONY: update-submodules download-models download-samples download-sample-videos build-assets-downloader run-assets-downloader build-pipeline-runner run-loss-prevention run-lp down-lp clean-images clean-containers clean-all clean-project-images validate-config validate-camera-config validate-all-configs check-models check-device-env
+-include .env
 
 
-HTTP_PROXY := $(or $(HTTP_PROXY),$(http_proxy))
-HTTPS_PROXY := $(or $(HTTPS_PROXY),$(https_proxy))
+HTTP_PROXY ?= $(or $(HTTP_PROXY),$(http_proxy))
+HTTPS_PROXY ?= $(or $(HTTPS_PROXY),$(https_proxy))
+HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 export HTTP_PROXY
 export HTTPS_PROXY
-
-
-export PWD=$(shell pwd)
-HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
-export VLM_DEVICE ?= CPU
-export VLM_SERVICE_PORT ?= 8000
-export LP_BASE_DIR=$(PWD)
-export LLM_BASE_DIR=$(PWD)/microservices/vlm/ov-models
-export MINIO_API_HOST_PORT=4000
-export MINIO_CONSOLE_HOST_PORT=4001
-export LP_IP=$(HOST_IP)
-export LOCAL_UID=$(id -u)
-export LOCAL_GID=$(id -g)
+PWD ?= $(shell pwd)
+export PWD
+LP_TAG ?= $(shell cat VERSION)
+export LP_TAG
+VLM_DEVICE ?= CPU
+export VLM_DEVICE
+TARGET_DEVICE ?= GPU
+VLM_SERVICE_PORT ?= 8000
+export VLM_SERVICE_PORT
+LP_BASE_DIR ?= $(PWD)
+export LP_BASE_DIR
+LLM_BASE_DIR ?= $(PWD)/models/ovms-model
+export LLM_BASE_DIR
+MINIO_API_HOST_PORT ?= 4000
+export MINIO_API_HOST_PORT
+MINIO_CONSOLE_HOST_PORT ?= 4001
+export MINIO_CONSOLE_HOST_PORT
+LP_IP ?= $(HOST_IP)
+export LP_IP
+LOCAL_UID ?= $(shell id -u)
+export LOCAL_UID
+LOCAL_GID ?= $(shell id -g)
+export LOCAL_GID
+VIDEO_GROUP_ID ?= $(shell getent group video 2>/dev/null | cut -d: -f3 || echo 44)
+export VIDEO_GROUP_ID
+RENDER_GROUP_ID ?= $(shell getent group render 2>/dev/null | cut -d: -f3 || echo 1002)
+export RENDER_GROUP_ID
+USER_GROUP_ID ?= $(shell id -g)
+export USER_GROUP_ID
 # Default values for benchmark
 PIPELINE_COUNT ?= 1
 INIT_DURATION ?= 120
@@ -39,10 +57,20 @@ REGISTRY ?= true
 DOCKER_COMPOSE ?= docker-compose.yml
 STREAM_LOOP ?= true
 
+# OVMS and VLM defaults
+VLM_BACKEND ?= ovms
+export VLM_BACKEND
+OVMS_ENDPOINT ?= http://ovms-vlm:8000
+export OVMS_ENDPOINT
+OVMS_MODEL_NAME ?= Qwen/Qwen2.5-VL-7B-Instruct
+export OVMS_MODEL_NAME
+OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:2026.2.1,openvino/model_server:2026.2.1-gpu)
+export OVMS_IMAGE
+OVMS_HOST_PORT ?= 8002
+export OVMS_HOST_PORT
+
 
 TAG ?= latest
-LP_TAG = $(shell cat VERSION)
-export LP_TAG
 RENDER_MODE ?=0
 REGISTRY ?= true
 # Registry image references
@@ -91,24 +119,36 @@ build-lp-images:
 	@echo "Building loss prevention images"
 	docker compose -f src/$(DOCKER_COMPOSE) build
 
+MODEL_DOWNLOADER_COMMON = \
+    -e HTTP_PROXY=${HTTP_PROXY} \
+    -e HTTPS_PROXY=${HTTPS_PROXY} \
+    -e http_proxy=${HTTP_PROXY} \
+    -e https_proxy=${HTTPS_PROXY} \
+    -e LOCAL_UID=$(shell id -u) \
+    -e LOCAL_GID=$(shell id -g) \
+    -e MODELS_DIR=/workspace/models \
+    -e WORKLOAD_DIST=${WORKLOAD_DIST} \
+    -e HF_HOME=/root/.cache/huggingface \
+    -e HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN} \
+    -e HF_HUB_DOWNLOAD_TIMEOUT=600 \
+    -v "$(shell pwd)/models:/workspace/models" \
+    -v "$(shell pwd)/configs:/workspace/configs"
+
 run-model-downloader:
 	@echo "Running assets downloader"
-	docker run --rm \
-		-e HTTP_PROXY=${HTTP_PROXY} \
-		-e HTTPS_PROXY=${HTTPS_PROXY} \
-		-e http_proxy=${HTTP_PROXY} \
-		-e https_proxy=${HTTPS_PROXY} \
-		-e LOCAL_UID=$(shell id -u) \
-		-e LOCAL_GID=$(shell id -g) \
-		-e MODELS_DIR=/workspace/models \
-		-e WORKLOAD_DIST=${WORKLOAD_DIST} \
-		-e HF_HOME=/root/.cache/huggingface \
-		-e HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN} \
-		-e HF_HUB_DOWNLOAD_TIMEOUT=600 \
-		-v "$(shell pwd)/models:/workspace/models" \
-		-v "$(shell pwd)/configs:/workspace/configs" \
-		-v "$(shell pwd)/models/ov-model:/root/.cache/huggingface" \
-		$(REGISTRY_MODEL_DOWNLOADER)
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Registry mode: using fetched image scripts"; \
+		docker run --rm \
+			$(MODEL_DOWNLOADER_COMMON) \
+			$(REGISTRY_MODEL_DOWNLOADER); \
+	else \
+		echo "Local mode: using workspace download scripts override"; \
+		docker run --rm \
+			$(MODEL_DOWNLOADER_COMMON) \
+			-v "$(shell pwd)/download-scripts:/workspace/scripts" \
+			$(REGISTRY_MODEL_DOWNLOADER) \
+			/bin/bash -lc 'bash /workspace/scripts/model-downloader.sh'; \
+	fi
 	@echo "assets downloader completed"
 
 download-sample-videos: | validate-camera-config
@@ -120,6 +160,47 @@ update-submodules:
 	git submodule deinit -f .
 	git submodule update --init --recursive
 	@echo "Submodules updated (if any present)."
+
+check-device-env:
+	@echo "[INFO] Validating environment configuration..."
+	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
+		echo "[INFO] LP VLM flow detected - validating OVMS settings"; \
+		if [ "$(VLM_BACKEND)" != "ovms" ]; then \
+			echo "[ERROR] VLM_BACKEND must be 'ovms' for LP VLM flow (got: $(VLM_BACKEND))"; \
+			exit 1; \
+		fi; \
+		if [ -z "$(OVMS_ENDPOINT)" ]; then \
+			echo "[ERROR] OVMS_ENDPOINT is required when LP VLM flow is enabled"; \
+			exit 1; \
+		fi; \
+		if [ -z "$(OVMS_MODEL_NAME)" ]; then \
+			echo "[ERROR] OVMS_MODEL_NAME is required when LP VLM flow is enabled"; \
+			exit 1; \
+		fi; \
+		GRAPH="models/ovms-model/$(OVMS_MODEL_NAME)/graph.pbtxt"; \
+		if [ ! -f "$$GRAPH" ]; then \
+			echo "[INFO] graph.pbtxt not found, skipping device sync"; \
+		else \
+			VLM_DEV=$$(jq -r '.workload_pipeline_map.lp_vlm[]? | select((.type // "" | ascii_downcase) == "vlm") | .vlm_device // empty' configs/$(WORKLOAD_DIST) 2>/dev/null | head -1 || true); \
+			if [ -z "$$VLM_DEV" ] || [ "$$VLM_DEV" = "null" ]; then VLM_DEV="$(VLM_DEVICE)"; fi; \
+			GRAPH_DEV=$$(grep -E '^[[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*"[^"]+"' "$$GRAPH" | head -1 | sed -E 's/^[[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*"([^"]+)".*/\2/' || true); \
+			if [ -z "$$GRAPH_DEV" ]; then \
+				echo "[INFO] No target_device/device field found in $$GRAPH, skipping device sync"; \
+			elif [ "$$GRAPH_DEV" = "$$VLM_DEV" ]; then \
+				echo "[INFO] graph.pbtxt device already matches $$VLM_DEV"; \
+			else \
+				echo "[INFO] Updating graph.pbtxt device: $$GRAPH_DEV → $$VLM_DEV"; \
+				sed -i -E "0,/^([[:space:]]*(target_device|device)[[:space:]]*:[[:space:]]*\")[^\"]+(\".*)$$/s//\\1$$VLM_DEV\\3/" "$$GRAPH"; \
+				echo "[INFO] graph.pbtxt updated to $$VLM_DEV"; \
+			fi; \
+		fi; \
+	else \
+		echo "[INFO] Non-VLM flow detected - running non-VLM checks"; \
+		if jq -e '.workload_pipeline_map.lp_vlm | type == "array" and length > 0' configs/$(WORKLOAD_DIST) >/dev/null 2>&1; then \
+			echo "[INFO] lp_vlm workload exists in configs/$(WORKLOAD_DIST), but camera mapping is currently non-VLM"; \
+		fi; \
+	fi
+	@echo "[INFO] Environment configuration valid"
 
 run-lp: validate_workload_mapping update-submodules download-sample-videos
 	@echo "Running loss prevention pipeline"
@@ -324,6 +405,7 @@ clean-docs:
 
 validate_workload_mapping:
 	python3 src/validate-configs.py --validate-workload-mapping --camera-config configs/$(CAMERA_STREAM) --pipeline-config configs/$(WORKLOAD_DIST)
+	@$(MAKE) --no-print-directory check-device-env
 
 validate-pipeline-config:
 	@echo "Validating pipeline configuration..."

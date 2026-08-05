@@ -27,25 +27,24 @@ services:
       - ../models:/workspace/models
       - ../configs:/workspace/configs
       - ../results:/workspace/results
-      - ../models/ov-model:/root/.cache/huggingface
-    command: ["/bin/bash", "-c", "/workspace/scripts/model-downloader.sh"]
+    command: [ "/bin/bash", "-c", "/workspace/scripts/model-downloader.sh" ]
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"     # AMQP port
-      - "15672:15672"   # Management UI port
+      - "5672:5672" # AMQP port
+      - "15672:15672" # Management UI port
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "status"]
+      test: [ "CMD", "rabbitmq-diagnostics", "status" ]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s 
+      start_period: 20s
     networks:
-      - my_network  
+      - my_network
 
   minio-service:
     image: minio/minio:RELEASE.2025-02-07T23-21-09Z-cpuv1
@@ -66,7 +65,7 @@ services:
       --address ":80"
       --console-address ":81"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost/minio/health/live" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -102,7 +101,43 @@ services:
     networks:
       - my_network
 
-    
+  ovms-vlm:
+    image: ${OVMS_IMAGE:-openvino/model_server:2026.2.1-gpu}
+    container_name: ovms-vlm
+    group_add:
+      - video
+      - ${RENDER_GROUP_ID:-1002}
+    environment:
+      - OV_CACHE_DIR=/tmp/ov_cache
+      - LOG_LEVEL=INFO
+      - VLM_WORKLOAD_ENABLED=${LP_VLM_WORKLOAD_ENABLED}
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      - http_proxy=${http_proxy}
+      - https_proxy=${https_proxy}
+      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+    volumes:
+      - ../models/ovms-model:/models:ro
+      - ${OVMS_CACHE_DIR:-../models/ovms-cache}:/tmp/ov_cache
+    ports:
+      - "${OVMS_HOST_PORT:-8002}:8000"
+    command: >
+      --config_path /models/config.json --rest_port 8000
+    devices:
+      - /dev/dri:/dev/dri
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/v1/config | grep -q AVAILABLE" ]
+      interval: 10s
+      timeout: 10s
+      retries: 100
+      start_period: 45s
+    networks:
+      - my_network
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+
   # --- main services ---
   lp-vlm-workload-handler:
     container_name: lp-vlm-workload-handler
@@ -117,12 +152,14 @@ services:
     devices:
       - /dev/dri:/dev/dri
     group_add:
-      - ${USER_GROUP_ID:-1000} 
-      - ${VIDEO_GROUP_ID:-44}    
+      - ${USER_GROUP_ID:-1000}
+      - ${VIDEO_GROUP_ID:-44}
       - ${RENDER_GROUP_ID:-1002}
     environment:
       - VLM_WORKLOAD_ENABLED=${LP_VLM_WORKLOAD_ENABLED}
-      - VLM_DEVICE=CPU
+      - VLM_BACKEND=${VLM_BACKEND:-ovms}
+      - OVMS_ENDPOINT=${OVMS_ENDPOINT:-http://ovms-vlm:8000}
+      - OVMS_MODEL_NAME=${OVMS_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}
       - HTTP_PROXY=${HTTP_PROXY}
       - HTTPS_PROXY=${HTTPS_PROXY}
       - http_proxy=${http_proxy}
@@ -136,9 +173,9 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - RABBITMQ_MANAGEMENT_PORT=15672
-      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
-      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,localhost,127.0.0.1
-      - AMQP_NOTE=Use nc rabbitmq 5672 (curl is not valid for AMQP)     
+      - no_proxy=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+      - NO_PROXY=rabbitmq,minio-service,model-downloader,rtsp-streamer,ovms-vlm,localhost,127.0.0.1
+      - AMQP_NOTE=Use nc rabbitmq 5672 (curl is not valid for AMQP)
       - CONTAINER_RESULTS_PATH=${CONTAINER_RESULTS_PATH:-/app/results}
       - WORKLOAD_DIST=${WORKLOAD_DIST:-workload_to_pipeline.json}
       - CAMERA_STREAM=${CAMERA_STREAM:-camera_to_workload.json}
@@ -155,24 +192,25 @@ services:
       - ../lp-vlm/src/workload_utils.py:/app/workload_utils.py
       - ${RESULTS_DIR:-../results/vlm-results}:/app/results
       - ../configs:/app/lp/configs
-      - ../models/ov-model:/home/pipeline-server/lp-vlm/ov-model
       - ../vlm_loss_prevention.log:/app/loss_prevention_app.log
     networks:
       - my_network
     env_file:
-      - ../lp-vlm/src/.env  
+      - ../lp-vlm/src/.env
     depends_on:
       rtsp-streamer:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
       minio-service:
-        condition: service_healthy      
+        condition: service_healthy
       model-downloader:
         condition: service_completed_successfully
+      ovms-vlm:
+        condition: service_healthy
 
   vlm-pipeline-runner:
-    container_name: vlm-pipeline-runner    
+    container_name: vlm-pipeline-runner
     image: intel/pipeline-runner-lp:${LP_TAG}
     #user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     shm_size: '512m'
@@ -220,7 +258,7 @@ services:
       - ../models:/home/pipeline-server/lp-vlm/models
       - ../configs:/home/pipeline-server/lp-vlm/configs
       - ../performance-tools/sample-media:/home/pipeline-server/lp-vlm/sample-media
-      - ${RESULTS_DIR:-../results/vlm-results}:/app/results  
+      - ${RESULTS_DIR:-../results/vlm-results}:/app/results
       - /dev:/dev
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     networks:
@@ -232,7 +270,7 @@ services:
       rabbitmq:
         condition: service_healthy
       minio-service:
-        condition: service_healthy      
+        condition: service_healthy
       model-downloader:
         condition: service_completed_successfully
       lp-vlm-workload-handler:
@@ -272,8 +310,8 @@ services:
       - THRESHOLD=${THRESHOLD:-7}
       - LP_BASE_DIR=${LP_BASE_DIR}
       - DISPLAY=${DISPLAY:-:0}
-      - RENDER_MODE=${RENDER_MODE:-0}    
-      - CONTAINER_NAME=${CONTAINER_NAME:-gst}  
+      - RENDER_MODE=${RENDER_MODE:-0}
+      - CONTAINER_NAME=${CONTAINER_NAME:-gst}
       - CAMERA_STREAM=${CAMERA_STREAM:-camera_to_workload.json}
       - WORKLOAD_DIST=${WORKLOAD_DIST:-workload_to_pipeline.json}
       - BATCH_SIZE_DETECT=${BATCH_SIZE_DETECT:-1}
@@ -287,14 +325,14 @@ services:
       - GST_DEBUG=GST_TRACER:7,gvafpscounter:4
       - GST_TRACERS=latency_tracer(flags=pipeline)
       - ROUND_ROBIN_COUNT=4
-    
+
     volumes:
       - ../models:/home/pipeline-server/models
       - ../performance-tools/sample-media:/home/pipeline-server/sample-media
       - ${RESULTS_DIR:-../results}:/home/pipeline-server/results
       - ../configs:/home/pipeline-server/configs
       - ../src/pipelines:/home/pipeline-server/pipelines
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw 
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     networks:
       - my_network
     privileged: true
