@@ -5,8 +5,8 @@
 -include .env
 
 
-HTTP_PROXY ?= $(or $(HTTP_PROXY),$(http_proxy))
-HTTPS_PROXY ?= $(or $(HTTPS_PROXY),$(https_proxy))
+HTTP_PROXY := $(or $(HTTP_PROXY),$(http_proxy))
+HTTPS_PROXY := $(or $(HTTPS_PROXY),$(https_proxy))
 HOST_IP := $(shell ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p')
 export HTTP_PROXY
 export HTTPS_PROXY
