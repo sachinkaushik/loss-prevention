@@ -62,7 +62,7 @@ VLM_BACKEND ?= ovms
 export VLM_BACKEND
 OVMS_ENDPOINT ?= http://ovms-vlm:8000
 export OVMS_ENDPOINT
-OVMS_MODEL_NAME ?= Qwen/Qwen2.5-VL-7B-Instruct
+OVMS_MODEL_NAME ?= openbmb/MiniCPM-V-4_5-int4
 export OVMS_MODEL_NAME
 OVMS_IMAGE ?= $(if $(filter CPU,$(TARGET_DEVICE)),openvino/model_server:2026.3.1,openvino/model_server:2026.3.1-gpu)
 export OVMS_IMAGE

@@ -9,7 +9,7 @@ LP_IP = os.environ.get("LP_IP")
 LP_PORT = os.environ.get("LP_PORT", "8000")
 MINIO_API_HOST_PORT = os.environ.get("MINIO_API_HOST_PORT", "4000")
 
-VLM_MODEL = os.environ.get("VLM_MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct")
+VLM_MODEL = os.environ.get("VLM_MODEL_NAME", "openbmb/MiniCPM-V-4_5-int4")
 OVMS_ENDPOINT = os.environ.get("OVMS_ENDPOINT", "http://ovms-vlm:8000")
 OVMS_MODEL_NAME = os.environ.get("OVMS_MODEL_NAME", VLM_MODEL)
 SAMPLE_MEDIA_DIR = "sample-media"

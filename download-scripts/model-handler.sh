@@ -31,7 +31,7 @@ if [[ "$MODEL_NAME" == yolo* ]]; then
             -O "$quant_dataset"
     fi
     python3 "$SCRIPT_BASE_PATH/model_convert.py" quantize_yolo "$MODEL_NAME" "$quant_dataset" "$MODELS_PATH"
-elif [[ "$MODEL_NAME" == Qwen* ]]; then
+elif [[ "$MODEL_NAME" == Qwen* ]] || [[ "$MODEL_NAME" == openbmb/* ]]; then
     echo "[INFO] ###### Downloading VLM model: $MODEL_NAME ($PRECISION)"    
     OVMS_MODEL_DIR="$MODELS_PATH/ovms-model/$MODEL_NAME"
     if ovms_model_ready "$MODEL_NAME"; then

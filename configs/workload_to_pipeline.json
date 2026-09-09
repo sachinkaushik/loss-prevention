@@ -95,9 +95,9 @@
         "model": "yolo11n",
         "device": "CPU",
         "precision": "FP16",
-        "vlm_model": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "vlm_model": "openbmb/MiniCPM-V-4_5-int4",
         "vlm_device": "GPU",
-        "vlm_precision": "int8"
+        "vlm_precision": "int4"
       }
     ]
   }
