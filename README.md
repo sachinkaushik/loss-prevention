@@ -78,7 +78,6 @@ Push item-recognition accuracy beyond traditional CV with a **local Large Vision
 
 *Business takeaway*: fewer false positives (less customer friction, fewer staff interventions), better real-loss capture, and adaptability to new/seasonal/regional products **without a retraining cycle.** It’s the suite’s **GenAI-at-the-edge** workload, and it reports the metrics that matter for LLM/LVLM sizing (**TTFT, token throughput**, CPU/GPU/NPU utilization). Runs entirely locally, no cloud dependency.
 
-Default VLM configuration uses `Qwen/Qwen2.5-VL-7B-Instruct`. MiniCPM download and export support is also available for benchmarking and comparison, but it is not the default runtime model.
 
 
 ## Scope & related repositories
