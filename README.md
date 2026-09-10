@@ -145,14 +145,6 @@ Each use case supports three actions: **run** it, **benchmark** a fixed load, an
 | Loss Prevention (core, 6-camera) | `_cpu` · `_gpu` · `_gpu-npu` · `_hetero` (no `_npu`) |
 | LVLM-enhanced | none — single `workload_to_pipeline_vlm.json`; devices are set inside the JSON (`device`, `vlm_device`) |
 
-To benchmark MiniCPM explicitly without changing the default configuration, override the workload and OVMS model when downloading and running:
-
-```bash
-make download-models REGISTRY=false WORKLOAD_DIST=workload_to_pipeline_vlm_minicpm_int8.json OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
-
-make run-lp REGISTRY=false CAMERA_STREAM=camera_to_workload_vlm.json WORKLOAD_DIST=workload_to_pipeline_vlm_minicpm_int8.json OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
-```
-
 Run `ls configs/workload_to_pipeline_*` to confirm what your checkout provides. Passing a variant that doesn't exist fails fast — `make run-lp` validates the pair first and reports `Configuration file not found: configs/<name>.json`.
 
 > **View results for any benchmark/density run:** `make consolidate-metrics` → `cat benchmark/metrics.csv` and `make plot-metrics` → utilization chart.
@@ -226,7 +218,7 @@ make benchmark-stream-density
 make consolidate-metrics && cat benchmark/metrics.csv
 ```
 
-#### 4 · Loss prevention with an LVLM
+#### 4 · Run Loss prevention with the VLM Workload With Qwen (Default)
 
 **Set the credentials it needs**
 ```sh
@@ -245,6 +237,46 @@ make run-lp CAMERA_STREAM=camera_to_workload_vlm.json STREAM_LOOP=false
 make benchmark CAMERA_STREAM=camera_to_workload_vlm.json WORKLOAD_DIST=workload_to_pipeline_vlm.json
 ```
 
+#### 4 · Run Loss prevention with the VLM Workload With MINICPM
+
+Set the credentials needed by the VLM workflow before you run it:
+
+```bash
+export MINIO_ROOT_USER=<...> MINIO_ROOT_PASSWORD=<...>
+export RABBITMQ_USER=<...> RABBITMQ_PASSWORD=<...>
+export GATED_MODEL=true HUGGINGFACE_TOKEN=<...>
+```
+
+Use the dedicated VLM camera and workload configs:
+
+Edit the existing VLM config files:
+
+- `configs/workload_to_pipeline_vlm.json`
+
+Update the VLM entry to:
+
+- `vlm_model`: `openbmb/MiniCPM-V-4_5`
+- `vlm_precision`: `int4`
+
+```bash
+make download-models \ 
+  WORKLOAD_DIST=workload_to_pipeline_vlm.json \
+  OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+
+
+make run-lp \
+  CAMERA_STREAM=camera_to_workload_vlm.json \
+  WORKLOAD_DIST=workload_to_pipeline_vlm.json \
+  OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+```
+
+Benchmark the same VLM workload after the service is up:
+
+```bash
+make benchmark \
+  CAMERA_STREAM=camera_to_workload_vlm.json \
+  WORKLOAD_DIST=workload_to_pipeline_vlm.json
+```
 
 __What to Expect__
   
