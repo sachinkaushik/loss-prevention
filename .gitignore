@@ -13,3 +13,4 @@ lp-vlm/lp-vlm.env
 vlm_loss_prevention.log
 download-scripts/venv/
 download-scripts/ovms-export-venv/
+download-scripts/export_requirements.txt

@@ -172,11 +172,14 @@ source_model_requires_export() {
 }
 
 setup_python_env() {
-    if [[ ! -f "${SCRIPT_DIR}/export_model.py" ]]; then
-        local export_base_url
-        export_base_url="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/1/demos/common/export_models"
+    local export_base_url
+    export_base_url="https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2026/1/demos/common/export_models"
 
+    if [[ ! -f "${SCRIPT_DIR}/export_model.py" ]]; then
         curl -fsSL "${export_base_url}/export_model.py" -o "${SCRIPT_DIR}/export_model.py"
+    fi
+
+    if [[ ! -f "${SCRIPT_DIR}/export_requirements.txt" ]]; then
         curl -fsSL "${export_base_url}/requirements.txt" -o "${SCRIPT_DIR}/export_requirements.txt"
     fi
 
