@@ -25,18 +25,40 @@ def ensure_yolo_weights(weights_path):
 
     download_url = f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{weights_file.name}"
     print(f"[INFO] Prefetching YOLO weights from {download_url}")
-    subprocess.run(
-        [
-            "wget",
-            "--no-check-certificate",
-            "--tries=3",
-            "--timeout=30",
-            "-O",
-            str(weights_file),
-            download_url,
-        ],
-        check=True,
-    )
+
+    wget_cmd = [
+        "wget",
+        "-4",
+        "--no-check-certificate",
+        "--tries=10",
+        "--waitretry=5",
+        "--retry-connrefused",
+        "--timeout=60",
+        "-O",
+        str(weights_file),
+        download_url,
+    ]
+    if subprocess.run(wget_cmd).returncode == 0 and weights_file.stat().st_size > 0:
+        return
+
+    print("[WARN] wget failed for YOLO weights; falling back to curl")
+    curl_cmd = [
+        "curl",
+        "-4",
+        "-fL",
+        "-k",
+        "--retry",
+        "10",
+        "--retry-delay",
+        "5",
+        "--retry-all-errors",
+        "--connect-timeout",
+        "30",
+        "-o",
+        str(weights_file),
+        download_url,
+    ]
+    subprocess.run(curl_cmd, check=True)
 
 def get_model_type(model_name, mapping_path=None):  
     if mapping_path is None:
