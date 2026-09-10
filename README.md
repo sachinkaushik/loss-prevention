@@ -78,6 +78,8 @@ Push item-recognition accuracy beyond traditional CV with a **local Large Vision
 
 *Business takeaway*: fewer false positives (less customer friction, fewer staff interventions), better real-loss capture, and adaptability to new/seasonal/regional products **without a retraining cycle.** It’s the suite’s **GenAI-at-the-edge** workload, and it reports the metrics that matter for LLM/LVLM sizing (**TTFT, token throughput**, CPU/GPU/NPU utilization). Runs entirely locally, no cloud dependency.
 
+Default VLM configuration uses `Qwen/Qwen2.5-VL-7B-Instruct`. MiniCPM download and export support is also available for benchmarking and comparison, but it is not the default runtime model.
+
 
 ## Scope & related repositories
 This repo covers loss prevention at the self-checkout and point of sale, built on the Automated Self-Checkout foundation above. Store-wide loss prevention is a separate effort in the Intel Retail AI Suite:
@@ -143,6 +145,14 @@ Each use case supports three actions: **run** it, **benchmark** a fixed load, an
 | ASC — age verification | `_cpu` · `_gpu` · `_npu` · `_hetero` |
 | Loss Prevention (core, 6-camera) | `_cpu` · `_gpu` · `_gpu-npu` · `_hetero` (no `_npu`) |
 | LVLM-enhanced | none — single `workload_to_pipeline_vlm.json`; devices are set inside the JSON (`device`, `vlm_device`) |
+
+To benchmark MiniCPM explicitly without changing the default configuration, override the workload and OVMS model when downloading and running:
+
+```bash
+make download-models REGISTRY=false WORKLOAD_DIST=workload_to_pipeline_vlm_minicpm_int8.json OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+
+make run-lp REGISTRY=false CAMERA_STREAM=camera_to_workload_vlm.json WORKLOAD_DIST=workload_to_pipeline_vlm_minicpm_int8.json OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+```
 
 Run `ls configs/workload_to_pipeline_*` to confirm what your checkout provides. Passing a variant that doesn't exist fails fast — `make run-lp` validates the pair first and reports `Configuration file not found: configs/<name>.json`.
 
