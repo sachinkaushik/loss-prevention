@@ -15,3 +15,4 @@ download-scripts/venv/
 download-scripts/ovms-export-venv/
 download-scripts/export_requirements.txt
 download-scripts/__pycache__/*
+download-scripts/export_model.py
