@@ -260,14 +260,13 @@ Update the VLM entry to:
 
 ```bash
 make download-models \ 
-  WORKLOAD_DIST=workload_to_pipeline_vlm.json \
-  OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+  WORKLOAD_DIST=workload_to_pipeline_vlm.json
 
 
 make run-lp \
   CAMERA_STREAM=camera_to_workload_vlm.json \
   WORKLOAD_DIST=workload_to_pipeline_vlm.json \
-  OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5'
+  OVMS_MODEL_NAME='openbmb/MiniCPM-V-4_5-int4'
 ```
 
 Benchmark the same VLM workload after the service is up:
