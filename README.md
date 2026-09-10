@@ -218,7 +218,7 @@ make benchmark-stream-density
 make consolidate-metrics && cat benchmark/metrics.csv
 ```
 
-#### 4 · Run Loss prevention with the VLM Workload With Qwen (Default)
+#### 4 · Run Loss prevention with the VLM Workload With Qwen Model (Default)
 
 **Set the credentials it needs**
 ```sh
@@ -237,7 +237,7 @@ make run-lp CAMERA_STREAM=camera_to_workload_vlm.json STREAM_LOOP=false
 make benchmark CAMERA_STREAM=camera_to_workload_vlm.json WORKLOAD_DIST=workload_to_pipeline_vlm.json
 ```
 
-#### 4 · Run Loss prevention with the VLM Workload With MINICPM
+#### 4 · Run Loss prevention with the VLM Workload With MINICPM Model
 
 Set the credentials needed by the VLM workflow before you run it:
 
