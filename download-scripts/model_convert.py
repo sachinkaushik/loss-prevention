@@ -17,6 +17,27 @@ from ultralytics.utils.metrics import ConfusionMatrix
 from openvino import Core, serialize
 from pathlib import Path
 
+
+def ensure_yolo_weights(weights_path):
+    weights_file = Path(weights_path)
+    if weights_file.exists():
+        return
+
+    download_url = f"https://github.com/ultralytics/assets/releases/download/v8.3.0/{weights_file.name}"
+    print(f"[INFO] Prefetching YOLO weights from {download_url}")
+    subprocess.run(
+        [
+            "wget",
+            "--no-check-certificate",
+            "--tries=3",
+            "--timeout=30",
+            "-O",
+            str(weights_file),
+            download_url,
+        ],
+        check=True,
+    )
+
 def get_model_type(model_name, mapping_path=None):  
     if mapping_path is None:
         mapping_path = os.path.join(os.path.dirname(__file__), "../configs/yolo_model_type_mapping.json")
@@ -47,6 +68,7 @@ def export_yolo(model_name, output_dir):
     model_dir = os.path.join(output_dir, "object_detection", model_name)
     os.makedirs(model_dir, exist_ok=True)
     weights = model_name + ".pt"
+    ensure_yolo_weights(weights)
     model = YOLO(weights)
     model.info()
     converted_path = model.export(format='openvino')
