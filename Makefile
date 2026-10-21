@@ -203,7 +203,7 @@ check-device-env:
 	fi
 	@echo "[INFO] Environment configuration valid"
 
-run-lp: validate_workload_mapping update-submodules download-sample-videos
+run-lp: 
 	@echo "Running loss prevention pipeline"
 	@LOG_FILE="vlm_loss_prevention.log"; \
 	mkdir -p $$(dirname $$LOG_FILE); \
@@ -213,10 +213,14 @@ run-lp: validate_workload_mapping update-submodules download-sample-videos
 	else \
 		$(MAKE) run; \
 	fi
+	@echo "Starting Loss Prevention MCP service"
+	$(MAKE) mcp-up
 
 
 down-lp:	
 	docker compose -f src/$(DOCKER_COMPOSE) down	
+	@echo "Stopping Loss Prevention MCP service"
+	-$(MAKE) mcp-down
 	@echo "Cleaning up VLM temporary files..."
 	@rm -f vlm_loss_prevention.log
 	@rm -f lp-vlm/lp-vlm.env
@@ -440,3 +444,35 @@ plot-metrics:
 	python3 usage_graph_plot.py --dir $(RESULTS_DIR)  && \
 	deactivate \
 	)
+
+# ---------- Loss Prevention MCP sensor service ----------
+.PHONY: mcp-build mcp-up mcp-down mcp-seed mcp-bench mcp-test mcp-import
+
+MCP_COMPOSE ?= mcp-service/docker-compose.yml
+
+mcp-build:
+	docker compose -f $(MCP_COMPOSE) build
+
+mcp-up:
+	docker compose -f $(MCP_COMPOSE) up --build -d
+
+mcp-down:
+	docker compose -f $(MCP_COMPOSE) down
+
+mcp-seed:
+	docker compose -f $(MCP_COMPOSE) exec lp-mcp-service python /app/scripts/seed_demo.py
+
+# Import this run's non-VLM JSONL output (results/rs-*.jsonl) into the MCP log.
+LP_LANE ?= lane-1
+mcp-import:
+	docker compose -f $(MCP_COMPOSE) exec lp-mcp-service \
+		python /app/scripts/import_jsonl.py --results-dir /results \
+		--camera-config /configs/$(CAMERA_STREAM) --lane $(LP_LANE)
+
+# Clean benchmark run: preload history, durable log only, no hub fan-out.
+mcp-bench:
+	LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up --build -d
+
+mcp-test:
+	cd mcp-service && python3 -m pytest -q
+

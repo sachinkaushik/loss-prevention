@@ -1,0 +1,147 @@
+"""Pure query logic over the durable log. No MCP or agent concerns here.
+
+A "record" is a flattened event: the envelope's ref_id + ts_ms + a store-local
+timestamp merged with the payload fields.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from events import AGE_EVENT, LOSS_EVENT
+from models import AgeRangeCount
+
+_MAX = 10_000
+SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+_STORE_TIMEZONE = os.getenv("LP_TIMEZONE", "Asia/Kolkata")
+
+
+def _to_record(event: Any) -> dict[str, Any]:
+    """Flatten an event envelope into a query row."""
+    local_time = datetime.fromtimestamp(
+        event.ts_ms / 1000, tz=timezone.utc
+    ).astimezone(ZoneInfo(_STORE_TIMEZONE))
+    timestamp = (
+        f"{local_time.strftime('%B')} {local_time.day}, {local_time.year} at "
+        f"{local_time.strftime('%I').lstrip('0')}:{local_time.strftime('%M:%S %p %Z')}"
+    )
+    return {
+        "ref_id": event.ref_id,
+        "ts_ms": event.ts_ms,
+        "timestamp": timestamp,
+        "event_type": event.event_type,
+        **event.payload,
+    }
+
+
+def parse_time_range(
+    start_time: str | None,
+    end_time: str | None,
+    store_timezone: str,
+) -> tuple[int | None, int | None]:
+    """Convert ISO datetimes to epoch milliseconds using the store timezone."""
+    zone = ZoneInfo(store_timezone)
+
+    def parse(value: str | None) -> int | None:
+        if value is None:
+            return None
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=zone)
+        return int(parsed.timestamp() * 1000)
+
+    start_ms = parse(start_time)
+    end_ms = parse(end_time)
+    if start_ms is not None and end_ms is not None and start_ms > end_ms:
+        raise ValueError("start_time must be earlier than or equal to end_time")
+    return start_ms, end_ms
+
+
+def _iter_records(
+    log: Any,
+    event_type: str,
+    start_ms: int | None,
+    end_ms: int | None,
+) -> Iterator[dict[str, Any]]:
+    newest_first = start_ms is None and end_ms is None
+    records = [
+        _to_record(event)
+        for event in log.read(
+            event_type=event_type,
+            limit=_MAX,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            newest_first=newest_first,
+        )
+    ]
+    yield from reversed(records) if newest_first else records
+
+
+def loss_history(
+    log: Any,
+    scenario: str | None = None,
+    lane: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    limit: int = _MAX,
+) -> list[dict[str, Any]]:
+    """Loss events, optionally filtered by scenario and/or lane, oldest first."""
+    out: list[dict[str, Any]] = []
+    for record in _iter_records(log, LOSS_EVENT, start_ms, end_ms):
+        if scenario and record.get("scenario") != scenario:
+            continue
+        if lane and str(record.get("lane")) != str(lane):
+            continue
+        out.append(record)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def age_range_counts(
+    log: Any,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    lane: str | None = None,
+) -> list[AgeRangeCount]:
+    """Count age estimates by age range over the period, optionally per lane."""
+    buckets: dict[str, int] = {}
+    for record in _iter_records(log, AGE_EVENT, start_ms, end_ms):
+        if lane and str(record.get("lane")) != str(lane):
+            continue
+        age_range = str(record.get("age_range", "unknown"))
+        buckets[age_range] = buckets.get(age_range, 0) + 1
+    return [{"age_range": age_range, "count": count}
+            for age_range, count in sorted(buckets.items())]
+
+
+def loss_event_count(
+    log: Any,
+    scenario: str | None = None,
+    lane: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+) -> int:
+    """Compact count of loss events matching the supplied filters."""
+    count = 0
+    for record in _iter_records(log, LOSS_EVENT, start_ms, end_ms):
+        if scenario and record.get("scenario") != scenario:
+            continue
+        if lane and str(record.get("lane")) != str(lane):
+            continue
+        count += 1
+    return count
+
+
+def lanes(log: Any) -> list[str]:
+    """Distinct lane ids that have any loss activity."""
+    return sorted({str(record["lane"]) for record in loss_history(log) if record.get("lane")})
+
+
+def all_scenarios(log: Any) -> set[str]:
+    """Scenario values present in the log (for filter validation)."""
+    return {str(record["scenario"]) for record in loss_history(log) if record.get("scenario")}
