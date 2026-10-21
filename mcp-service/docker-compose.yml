@@ -22,6 +22,9 @@ services:
       USE_CASE: ${USE_CASE:-retail}
       SEED_DEMO: ${SEED_DEMO:-false}
       LP_RESULTS_DIR: /results
+      LP_JSONL_WATCH: ${LP_JSONL_WATCH:-on}
+      LP_CAMERA_CONFIG: /configs/${CAMERA_STREAM:-camera_to_workload.json}
+      LP_LANE: ${LP_LANE:-lane-1}
     volumes:
       - lp-mcp-data:/data
       # Read non-VLM pipeline JSONL output and camera configs for `make mcp-import`.

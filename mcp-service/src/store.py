@@ -44,6 +44,13 @@ class DurableEventStore:
                 "CREATE INDEX IF NOT EXISTS idx_events_type_ts_seq "
                 "ON events(event_type, ts_ms, seq)"
             )
+            self._connection.execute(
+                """CREATE TABLE IF NOT EXISTS ingest_offsets (
+                    path TEXT PRIMARY KEY,
+                    byte_offset INTEGER NOT NULL,
+                    last_window INTEGER
+                )"""
+            )
 
     def append_once(self, event: EventEnvelope) -> tuple[int, bool]:
         with self._lock:
@@ -104,6 +111,23 @@ class DurableEventStore:
                 (from_seq,),
             ).fetchall()
         yield from (EventEnvelope.from_json(row[0]) for row in rows)
+
+    def get_ingest_offset(self, path: str) -> tuple[int, int | None] | None:
+        """Return (byte_offset, last_sample_window) for a source file, or None if unseen."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT byte_offset, last_window FROM ingest_offsets WHERE path = ?", (path,)
+            ).fetchone()
+        return (int(row[0]), row[1]) if row else None
+
+    def set_ingest_offset(self, path: str, byte_offset: int, last_window: int | None) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO ingest_offsets (path, byte_offset, last_window) VALUES (?, ?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET byte_offset = excluded.byte_offset, "
+                "last_window = excluded.last_window",
+                (path, byte_offset, last_window),
+            )
 
     def close(self) -> None:
         with self._lock:

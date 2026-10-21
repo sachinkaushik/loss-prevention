@@ -74,22 +74,35 @@ Run the tests:
 
 ## 4. One command up (Docker)
 
-From the repository root:
+The MCP service is part of the main `src/docker-compose.yml` stack under the
+`mcp` profile and shares that stack's network and result directory. From the
+repository root:
 
 ```bash
-make mcp-up           # build + start the MCP service (port 9100)
-make mcp-seed         # preload demo history into the running container
-make mcp-down         # stop and remove
-
-# Clean benchmark run (durable log only, no hub fan-out):
-make mcp-bench
+make run-lp CAMERA_STREAM=camera_to_workload_asc_age_verification.json \
+  WORKLOAD_DIST=workload_to_pipeline_asc_age_verification_gpu.json
 ```
 
-Or directly with compose:
+`run-lp` enables the profile and starts the pipeline and MCP service in the same
+Compose project, then returns immediately. There is no wait or import step: a
+background watcher inside the MCP service streams this run's results into the
+log every few seconds while the pipeline runs (see section 7). VLM workloads
+produce no JSONL, so the watcher stays idle; their output uses the separate
+RabbitMQ path.
+
+To start only the MCP service from the main stack:
 
 ```bash
-cd mcp-service
-SEED_DEMO=true docker compose up --build -d
+make mcp-up           # main src/docker-compose.yml, MCP profile only
+make mcp-seed         # preload demo history
+make mcp-import CAMERA_STREAM=camera_to_workload_asc_age_verification.json  # manual backfill
+make mcp-down
+```
+
+Clean benchmark run (durable log only, no hub fan-out):
+
+```bash
+make mcp-bench
 ```
 
 ## 5. Configuration
@@ -106,6 +119,12 @@ SEED_DEMO=true docker compose up --build -d
 | `LP_LANE_CONFIG_PATH` | `/app/lane_config.json` | Optional known-lane list. |
 | `LP_TIMEZONE` | `Asia/Kolkata` | Timezone for naive ISO datetimes. |
 | `SEED_DEMO` | `false` | Preload demo history at container start. |
+| `LP_JSONL_WATCH` | `on` | `off` disables the background JSONL watcher. |
+| `LP_RESULTS_DIR` | `/results` | Directory watched for `rs-*.jsonl`. |
+| `LP_CAMERA_CONFIG` | `/configs/camera_to_workload.json` | Camera config mapping files to cameras (Compose sets it from `CAMERA_STREAM`). |
+| `LP_LANE` | `lane-1` | Lane stamped on ingested events. |
+| `LP_JSONL_POLL_SECONDS` | `2` | Watcher poll interval. |
+| `LP_IMPORT_SAMPLE_SECONDS` | `1.0` | Keep one record per camera per N stream-seconds (`0` = all). |
 
 ## 6. Coding-agent walkthrough
 
@@ -128,17 +147,29 @@ How the loss-prevention pipeline emits data depends on the workload:
 - **VLM workload** (`lp_vlm`) publishes to RabbitMQ `object_detection` through a
   `gvapython` step; a RabbitMQ consumer can be added later for that path only.
 
-### Import JSONL into the MCP (non-VLM)
-`scripts/import_jsonl.py` maps each `rs-*.jsonl` to its camera (by branch index)
-using the camera config, aggregates per tracking id, and records events:
-- `age.label` (numeric) -> median per track -> bucketed `age_range` -> `age_estimate`
-- a camera whose workload name is a known scenario -> `loss_event` per track
+### Live ingestion (non-VLM)
+`src/jsonl_watch.py` runs as a background thread in the MCP server. Every
+`LP_JSONL_POLL_SECONDS` it:
+- reads only newline-terminated records past a per-file byte offset (a partial
+  line still being written is left for the next poll);
+- maps each `rs-*.jsonl` to its camera (by branch index) using the camera config;
+- samples one record per camera per `LP_IMPORT_SAMPLE_SECONDS` of stream time
+  (tracker ids are not stable across frames, so sampling bounds volume);
+- records an `age_estimate` per sampled person (`age.label` bucketed into
+  `0-18, 18-25, 25-35, 35-45, 45-60, 60+`), and one `loss_event` per track for a
+  camera whose workload name is a known scenario.
 
-After a pipeline run (the MCP container mounts `results/` and `configs/`):
+Offsets and sampling state are persisted in the same SQLite file, so a restart
+resumes where it stopped without duplicates. A file is picked up only if it was
+modified after both the run marker written by `run-lp`
+(`results/.lp_mcp_run_started_ms`) and the watcher's start time, so results
+from earlier runs are never re-attributed to the current camera config.
+
+### Manual backfill
+`scripts/import_jsonl.py` reuses the same parsing, so its ref_ids match the
+watcher's and re-imports never duplicate events. Use it to load results from
+earlier runs (the MCP container mounts `results/` and `configs/`):
 
 ```bash
 make mcp-import CAMERA_STREAM=camera_to_workload_asc_age_verification.json
 ```
-
-Imports are idempotent (ref_id = file name + track), so re-running is safe. The
-numeric `age.label` is bucketed into `0-18, 18-25, 25-35, 35-45, 45-60, 60+`.

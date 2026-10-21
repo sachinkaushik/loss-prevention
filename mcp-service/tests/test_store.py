@@ -30,6 +30,12 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(seq1, seq2)
         self.assertEqual(len(self.store.read(event_type="loss_event")), 1)
 
+    def test_ingest_offset_roundtrip(self):
+        self.assertIsNone(self.store.get_ingest_offset("/results/rs-1.jsonl"))
+        self.store.set_ingest_offset("/results/rs-1.jsonl", 120, 4)
+        self.store.set_ingest_offset("/results/rs-1.jsonl", 240, 7)
+        self.assertEqual(self.store.get_ingest_offset("/results/rs-1.jsonl"), (240, 7))
+
     def test_read_filters_by_type_and_time(self):
         self.store.append(make_loss_event("store_001", "hidden_items", "lane-1", ref_id="r1", ts_ms=1000))
         self.store.append(make_loss_event("store_001", "product_switching", "lane-2", ref_id="r2", ts_ms=5000))

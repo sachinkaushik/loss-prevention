@@ -12,6 +12,8 @@ export HTTP_PROXY
 export HTTPS_PROXY
 PWD ?= $(shell pwd)
 export PWD
+LP_RESULTS_HOST ?= $(PWD)/results
+export LP_RESULTS_HOST
 LP_TAG ?= $(shell cat VERSION)
 export LP_TAG
 VLM_DEVICE ?= CPU
@@ -81,6 +83,7 @@ REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(LP_TAG)
 
 VLM_LOGS_FILE ?= $(PWD)/vlm_loss_prevention.log
 LP_VLM_WORKLOAD_ENABLED := $(shell python3 lp-vlm/src/workload_utils.py --camera-config configs/$(CAMERA_STREAM) --has-lp-vlm)
+export LP_VLM_WORKLOAD_ENABLED
 
 # Set STREAM_LOOP based on LP_VLM_WORKLOAD_ENABLED
 ifeq ($(LP_VLM_WORKLOAD_ENABLED),1)
@@ -166,6 +169,12 @@ check-device-env:
 	@echo "[INFO] Validating environment configuration..."
 	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
 		echo "[INFO] LP VLM flow detected - validating OVMS settings"; \
+		for var in RABBITMQ_USER RABBITMQ_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do \
+			if [ -z "$$(printenv $$var)" ]; then \
+				echo "[ERROR] $$var must be set for the LP VLM flow (export it before make run-lp)"; \
+				exit 1; \
+			fi; \
+		done; \
 		if [ "$(VLM_BACKEND)" != "ovms" ]; then \
 			echo "[ERROR] VLM_BACKEND must be 'ovms' for LP VLM flow (got: $(VLM_BACKEND))"; \
 			exit 1; \
@@ -203,24 +212,30 @@ check-device-env:
 	fi
 	@echo "[INFO] Environment configuration valid"
 
-run-lp: 
-	@echo "Running loss prevention pipeline"
+run-lp:
+	@echo "Starting Loss Prevention pipeline..."
+	@mkdir -p "$(LP_RESULTS_HOST)"
+	@date +%s%3N > "$(LP_RESULTS_HOST)/.lp_mcp_run_started_ms"
+	@echo "Starting Loss Prevention MCP service..."
+	@$(MAKE) --no-print-directory -s mcp-up
 	@LOG_FILE="vlm_loss_prevention.log"; \
 	mkdir -p $$(dirname $$LOG_FILE); \
 	[ -f $$LOG_FILE ] || touch $$LOG_FILE; \
 	if [ "$(RENDER_MODE)" != "0" ]; then \
-		$(MAKE) run-render-mode; \
+		COMPOSE_PROFILES=mcp $(MAKE) --no-print-directory run-render-mode; \
 	else \
-		$(MAKE) run; \
+		COMPOSE_PROFILES=mcp $(MAKE) --no-print-directory run; \
 	fi
-	@echo "Starting Loss Prevention MCP service"
-	$(MAKE) mcp-up
+	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
+		echo "VLM workload detected; the MCP JSONL watcher stays idle for this run."; \
+	else \
+		echo "Pipeline results stream into the MCP automatically (http://localhost:$(LP_MCP_PORT)/mcp)."; \
+	fi
 
 
-down-lp:	
-	docker compose -f src/$(DOCKER_COMPOSE) down	
-	@echo "Stopping Loss Prevention MCP service"
-	-$(MAKE) mcp-down
+down-lp:
+	@echo "Stopping Loss Prevention pipeline and MCP services..."
+	@COMPOSE_PROFILES=mcp docker compose -f src/$(DOCKER_COMPOSE) down
 	@echo "Cleaning up VLM temporary files..."
 	@rm -f vlm_loss_prevention.log
 	@rm -f lp-vlm/lp-vlm.env
@@ -448,30 +463,45 @@ plot-metrics:
 # ---------- Loss Prevention MCP sensor service ----------
 .PHONY: mcp-build mcp-up mcp-down mcp-seed mcp-bench mcp-test mcp-import
 
-MCP_COMPOSE ?= mcp-service/docker-compose.yml
+MCP_COMPOSE ?= src/$(DOCKER_COMPOSE)
+MCP_VOLUME := lp-mcp-data
+MCP_LEGACY_VOLUME := lp-mcp_lp-mcp-data
+LP_MCP_PORT ?= 9100
+# The MCP's background watcher reads this camera config and lane for live ingestion.
+LP_LANE ?= lane-1
+export CAMERA_STREAM LP_LANE LP_MCP_PORT
 
 mcp-build:
-	docker compose -f $(MCP_COMPOSE) build
+	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) build lp-mcp-service
 
 mcp-up:
-	docker compose -f $(MCP_COMPOSE) up --build -d
+	@legacy=$$(docker ps -q --filter label=com.docker.compose.project=lp-mcp --filter label=com.docker.compose.service=lp-mcp-service); \
+	if [ -n "$$legacy" ]; then echo "Migrating the existing MCP container to the main Compose stack..."; docker rm -f $$legacy >/dev/null; fi
+	@if docker volume inspect $(MCP_LEGACY_VOLUME) >/dev/null 2>&1 && ! docker volume inspect $(MCP_VOLUME) >/dev/null 2>&1; then \
+		echo "Copying MCP history from $(MCP_LEGACY_VOLUME) to $(MCP_VOLUME) (one time)..."; \
+		COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service >/dev/null 2>&1; \
+		COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) create --build lp-mcp-service >/dev/null 2>&1 && \
+		docker run --rm -v $(MCP_LEGACY_VOLUME):/from:ro -v $(MCP_VOLUME):/to intel/lp-mcp:$${LP_TAG:-latest} sh -c 'cp -a /from/. /to/' || \
+		echo "Warning: MCP history copy failed; starting with an empty log."; \
+	fi
+	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) up --build -d lp-mcp-service
 
 mcp-down:
-	docker compose -f $(MCP_COMPOSE) down
+	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service
 
 mcp-seed:
-	docker compose -f $(MCP_COMPOSE) exec lp-mcp-service python /app/scripts/seed_demo.py
+	@docker compose -f $(MCP_COMPOSE) exec lp-mcp-service python /app/scripts/seed_demo.py
 
-# Import this run's non-VLM JSONL output (results/rs-*.jsonl) into the MCP log.
-LP_LANE ?= lane-1
+# Manual backfill of non-VLM JSONL output (live runs are ingested by the watcher).
 mcp-import:
-	docker compose -f $(MCP_COMPOSE) exec lp-mcp-service \
+	@docker compose -f $(MCP_COMPOSE) exec lp-mcp-service \
 		python /app/scripts/import_jsonl.py --results-dir /results \
-		--camera-config /configs/$(CAMERA_STREAM) --lane $(LP_LANE)
+		--camera-config /configs/$(CAMERA_STREAM) --lane $(LP_LANE) \
+		$(if $(strip $(IMPORT_SINCE_MS)),--since-ms $(IMPORT_SINCE_MS),)
 
 # Clean benchmark run: preload history, durable log only, no hub fan-out.
 mcp-bench:
-	LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up --build -d
+	COMPOSE_PROFILES=mcp LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up --build -d lp-mcp-service
 
 mcp-test:
 	cd mcp-service && python3 -m pytest -q

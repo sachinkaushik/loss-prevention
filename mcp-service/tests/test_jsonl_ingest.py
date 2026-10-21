@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,17 @@ class JsonlIngestTests(unittest.TestCase):
         self.assertEqual(jsonl_ingest.branch_index_from_filename("rs-2_1__6_2026.jsonl"), 1)
         self.assertIsNone(jsonl_ingest.branch_index_from_filename("other.jsonl"))
 
+    def test_filter_files_since_excludes_previous_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "rs-1_old.jsonl"
+            new = Path(directory) / "rs-1_new.jsonl"
+            old.touch()
+            new.touch()
+            os.utime(old, (100, 100))
+            os.utime(new, (200, 200))
+            self.assertEqual(jsonl_ingest.filter_files_since([str(old), str(new)], 150_000), [str(new)])
+            self.assertEqual(jsonl_ingest.filter_files_since([str(old), str(new)], None), [str(old), str(new)])
+
     def test_camera_index_map(self):
         config = {"lane_config": {"cameras": [
             {"camera_id": "cam1", "workloads": ["asc_obj_detection_age_prediction_face_detection"]},
@@ -31,53 +43,50 @@ class JsonlIngestTests(unittest.TestCase):
         self.assertEqual(mapping[0]["camera_id"], "cam1")
         self.assertEqual(mapping[1]["workloads"], ["hidden_items"])
 
-    def test_aggregate_age_dedups_by_track_with_median(self):
-        objects = [
-            {"id": 7, "age": {"label": "40"}, "gender": {"label": "Male"}},
-            {"id": 7, "age": {"label": "44"}, "gender": {"label": "Male"}},
-            {"id": 7, "age": {"label": "42"}, "gender": {"label": "Male"}},
-            {"id": 9, "age": {"label": "20"}, "gender": {"label": "Female"}},
-            {"id": 9, "age": {"label": "22"}, "gender": {"label": "Female"}},
-        ]
-        result = jsonl_ingest.aggregate_age(objects)
-        self.assertEqual(set(result), {"7", "9"})
-        self.assertEqual(result["7"]["median_age"], 42)
-        self.assertEqual(result["7"]["age_range"], "35-45")
-        self.assertEqual(result["7"]["gender"], "male")
-        self.assertEqual(result["9"]["age_range"], "18-25")
-
-    def test_aggregate_loss_tracks_distinct(self):
-        objects = [{"id": 1}, {"id": 1}, {"id": 2}, {"detection": {}}]
-        self.assertEqual(jsonl_ingest.aggregate_loss_tracks(objects), ["1", "2"])
-
-    def test_iter_objects_skips_blank_and_bad_lines(self):
+    def test_read_complete_lines_leaves_partial_line(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rs-1_1__1_2026.jsonl"
-            path.write_text(
-                json.dumps({"objects": [{"id": 1, "age": {"label": "30"}}]}) + "\n"
-                "\n"
-                "not-json\n"
-                + json.dumps({"objects": [{"id": 2}]}) + "\n",
-                encoding="utf-8",
-            )
-            objects = list(jsonl_ingest.iter_objects(path))
-        self.assertEqual([o.get("id") for o in objects], [1, 2])
+            path.write_bytes(b'{"a":1}\n{"b":2}\n{"c":')
+            lines, offset = jsonl_ingest.read_complete_lines(path, 0)
+            self.assertEqual(lines, ['{"a":1}', '{"b":2}'])
+            self.assertEqual(offset, 16)
+            self.assertEqual(jsonl_ingest.read_complete_lines(path, offset), ([], offset))
+            with open(path, "ab") as handle:
+                handle.write(b'3}\n')
+            lines, offset = jsonl_ingest.read_complete_lines(path, offset)
+            self.assertEqual(lines, ['{"c":3}'])
+            self.assertEqual(offset, path.stat().st_size)
 
-    def test_sampled_objects_keeps_one_record_per_window(self):
-        one_second = 1_000_000_000
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "rs-1_1__1_2026.jsonl"
-            lines = [
-                {"timestamp": 0, "objects": [{"id": 1}]},
-                {"timestamp": 300_000_000, "objects": [{"id": 2}]},   # same 0s window -> dropped
-                {"timestamp": 1_200_000_000, "objects": [{"id": 3}]},  # next 1s window -> kept
-                {"timestamp": 1_900_000_000, "objects": [{"id": 4}]},  # same 1s window -> dropped
-            ]
-            path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
-            kept = [o["id"] for o in jsonl_ingest.sampled_objects(path, one_second)]
-            every = [o["id"] for o in jsonl_ingest.sampled_objects(path, 0)]
-        self.assertEqual(kept, [1, 3])
-        self.assertEqual(every, [1, 2, 3, 4])
+    def test_parse_record_skips_blank_and_bad_lines(self):
+        self.assertIsNone(jsonl_ingest.parse_record(""))
+        self.assertIsNone(jsonl_ingest.parse_record("not-json"))
+        self.assertIsNone(jsonl_ingest.parse_record("[1, 2]"))
+        self.assertEqual(jsonl_ingest.parse_record('{"timestamp": 5, "objects": [{"id": 1}]}'),
+                         (5, [{"id": 1}]))
+
+    def test_events_from_lines_samples_and_buckets_age(self):
+        lines = [json.dumps(r) for r in (
+            {"timestamp": 0, "objects": [{"id": 1, "age": {"label": "40"}, "gender": {"label": "Male"}}]},
+            {"timestamp": 300_000_000, "objects": [{"id": 2, "age": {"label": "20"}}]},  # same window
+            {"timestamp": 1_200_000_000, "objects": [{"id": 3, "age": {"label": "20"}}, {"id": 4}]},
+        )]
+        camera = {"camera_id": "cam1", "workloads": ["age_prediction"]}
+        age, loss, window = jsonl_ingest.events_from_lines("rs-1", lines, camera, 1_000_000_000, None)
+        self.assertEqual([e["age_range"] for e in age], ["35-45", "18-25"])
+        self.assertEqual(age[0]["gender"], "male")
+        self.assertEqual(age[1]["ref_id"], "rs-1-age-1200000000-0")
+        self.assertEqual(loss, [])
+        self.assertEqual(window, 1)
+        # Resuming with the carried window drops already-sampled windows.
+        age, _, _ = jsonl_ingest.events_from_lines("rs-1", lines, camera, 1_000_000_000, window)
+        self.assertEqual(age, [])
+
+    def test_events_from_lines_maps_loss_scenario_once_per_track(self):
+        lines = [json.dumps({"timestamp": t, "objects": [{"id": 7}]}) for t in (0, 2_000_000_000)]
+        camera = {"camera_id": "cam2", "workloads": ["hidden_items"]}
+        _, loss, _ = jsonl_ingest.events_from_lines("rs-2", lines, camera, 1_000_000_000, None)
+        self.assertEqual(loss, [{"scenario": "hidden_items", "tracking_id": "7",
+                                 "ref_id": "rs-2-loss-hidden_items-7"}])
 
 
 if __name__ == "__main__":
