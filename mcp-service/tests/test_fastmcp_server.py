@@ -53,7 +53,7 @@ class FastMcpServerTests(unittest.IsolatedAsyncioTestCase):
             counts = await client.call_tool("Get_age_range_counts", {})
             lanes = await client.call_tool("Get_lanes", {})
         self.assertTrue(any(row["scenario"] == "hidden_items" for row in _rows(loss)))
-        self.assertIn({"age_range": "18-25", "count": 1}, _rows(counts))
+        self.assertIn({"age_range": "18-25", "detections": 1}, _rows(counts))
         self.assertIn("lane-1", _rows(lanes))
 
 

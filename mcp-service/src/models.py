@@ -37,7 +37,7 @@ class AgeEstimate(TypedDict):
 
 
 class AgeRangeCount(TypedDict):
-    """Count of age estimates for one age range over the queried period."""
+    """Number of sampled age detections (not unique people) for one age range."""
 
     age_range: str
-    count: int
+    detections: int

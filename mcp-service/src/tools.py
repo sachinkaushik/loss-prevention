@@ -189,7 +189,11 @@ def Get_age_range_counts(
         str | None, Field(description="Optional lane id to scope the counts.")
     ] = None,
 ) -> list[AgeRangeCount]:
-    """Count age estimates by age range over a period (feeds signage decisions)."""
+    """Count sampled age detections by age range over a period (feeds signage decisions).
+
+    Each count is detections (each visible face, sampled about once per second per
+    camera), not unique people: report them as detections, never as people or customers.
+    """
     _validate_lane(lane)
     start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
     return queries.age_range_counts(store, start_ms, end_ms, lane)

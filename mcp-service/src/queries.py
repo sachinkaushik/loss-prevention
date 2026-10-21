@@ -115,7 +115,7 @@ def age_range_counts(
             continue
         age_range = str(record.get("age_range", "unknown"))
         buckets[age_range] = buckets.get(age_range, 0) + 1
-    return [{"age_range": age_range, "count": count}
+    return [{"age_range": age_range, "detections": count}
             for age_range, count in sorted(buckets.items())]
 
 

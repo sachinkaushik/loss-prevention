@@ -51,11 +51,11 @@ class QueryTests(unittest.TestCase):
     def test_age_range_counts_sorted_with_optional_lane(self):
         self.assertEqual(
             queries.age_range_counts(self.store),
-            [{"age_range": "0-18", "count": 1}, {"age_range": "18-25", "count": 2}],
+            [{"age_range": "0-18", "detections": 1}, {"age_range": "18-25", "detections": 2}],
         )
         self.assertEqual(
             queries.age_range_counts(self.store, lane="lane-1"),
-            [{"age_range": "18-25", "count": 1}],
+            [{"age_range": "18-25", "detections": 1}],
         )
 
     def test_loss_event_count_and_lanes(self):

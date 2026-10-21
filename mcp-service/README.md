@@ -44,7 +44,7 @@ EventEnvelope(event_type, service="loss_prevention", store_id, payload,
 |---|---|---|
 | `describe` | — | service info, event-type schemas, read tools, `act_tools: []`, `subscribe: disabled` |
 | `Get_loss_history` | `scenario?`, `lane?`, `start_time?`, `end_time?`, `limit?` | newest matching loss events |
-| `Get_age_range_counts` | `start_time?`, `end_time?`, `lane?` | counts grouped by age range |
+| `Get_age_range_counts` | `start_time?`, `end_time?`, `lane?` | sampled detections grouped by age range (not unique people) |
 | `Get_loss_event_count` | `scenario?`, `lane?`, `start_time?`, `end_time?` | compact count |
 | `Get_lanes` | — | lanes with recorded loss activity |
 
@@ -57,9 +57,8 @@ cd mcp-service
 python3 -m venv .venv
 .venv/bin/pip install -e .
 
-# Preload demo history, then run the end-to-end query demo:
+# Optional: preload demo history (fake events; don't mix with real pipeline runs):
 .venv/bin/python scripts/seed_demo.py
-.venv/bin/python scripts/demo_e2e.py
 
 # Run the MCP server (stdio by default; HTTP for remote agents):
 .venv/bin/lp-mcp
@@ -118,7 +117,7 @@ make mcp-bench
 | `LP_EVENT_HUB_MIN_SEVERITY` | `high` | Minimum loss severity delivered to the hub. |
 | `LP_LANE_CONFIG_PATH` | `/app/lane_config.json` | Optional known-lane list. |
 | `LP_TIMEZONE` | `Asia/Kolkata` | Timezone for naive ISO datetimes. |
-| `SEED_DEMO` | `false` | Preload demo history at container start. |
+| `SEED_DEMO` | `false` | Preload fake demo history at container start (demo/benchmark only). |
 | `LP_JSONL_WATCH` | `on` | `off` disables the background JSONL watcher. |
 | `LP_RESULTS_DIR` | `/results` | Directory watched for `rs-*.jsonl`. |
 | `LP_CAMERA_CONFIG` | `/configs/camera_to_workload.json` | Camera config mapping files to cameras (Compose sets it from `CAMERA_STREAM`). |

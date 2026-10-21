@@ -52,7 +52,7 @@ def main() -> None:
         record_age_estimate(**event)
     print(
         f"seeded {len(queries.loss_history(store))} loss events, "
-        f"{sum(c['count'] for c in queries.age_range_counts(store))} age estimates "
+        f"{sum(c['detections'] for c in queries.age_range_counts(store))} age estimates "
         f"across lanes {queries.lanes(store)}"
     )
 

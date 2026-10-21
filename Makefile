@@ -461,11 +461,9 @@ plot-metrics:
 	)
 
 # ---------- Loss Prevention MCP sensor service ----------
-.PHONY: mcp-build mcp-up mcp-down mcp-seed mcp-bench mcp-test mcp-import
+.PHONY: mcp-build mcp-image mcp-up mcp-down mcp-seed mcp-bench mcp-test mcp-import
 
 MCP_COMPOSE ?= src/$(DOCKER_COMPOSE)
-MCP_VOLUME := lp-mcp-data
-MCP_LEGACY_VOLUME := lp-mcp_lp-mcp-data
 LP_MCP_PORT ?= 9100
 # The MCP's background watcher reads this camera config and lane for live ingestion.
 LP_LANE ?= lane-1
@@ -474,17 +472,21 @@ export CAMERA_STREAM LP_LANE LP_MCP_PORT
 mcp-build:
 	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) build lp-mcp-service
 
-mcp-up:
-	@legacy=$$(docker ps -q --filter label=com.docker.compose.project=lp-mcp --filter label=com.docker.compose.service=lp-mcp-service); \
-	if [ -n "$$legacy" ]; then echo "Migrating the existing MCP container to the main Compose stack..."; docker rm -f $$legacy >/dev/null; fi
-	@if docker volume inspect $(MCP_LEGACY_VOLUME) >/dev/null 2>&1 && ! docker volume inspect $(MCP_VOLUME) >/dev/null 2>&1; then \
-		echo "Copying MCP history from $(MCP_LEGACY_VOLUME) to $(MCP_VOLUME) (one time)..."; \
-		COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service >/dev/null 2>&1; \
-		COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) create --build lp-mcp-service >/dev/null 2>&1 && \
-		docker run --rm -v $(MCP_LEGACY_VOLUME):/from:ro -v $(MCP_VOLUME):/to intel/lp-mcp:$${LP_TAG:-latest} sh -c 'cp -a /from/. /to/' || \
-		echo "Warning: MCP history copy failed; starting with an empty log."; \
+# REGISTRY=true (default) pulls intel/lp-mcp:$(LP_TAG); REGISTRY=false builds from mcp-service/.
+mcp-image:
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Pulling MCP image intel/lp-mcp:$(LP_TAG) from registry..."; \
+		if ! COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) pull -q lp-mcp-service >/dev/null 2>&1; then \
+			echo "MCP image not available in registry; building it locally from mcp-service/..."; \
+			$(MAKE) --no-print-directory mcp-build; \
+		fi; \
+	else \
+		echo "Building MCP image locally from mcp-service/..."; \
+		$(MAKE) --no-print-directory mcp-build; \
 	fi
-	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) up --build -d lp-mcp-service
+
+mcp-up: mcp-image
+	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) up -d lp-mcp-service
 
 mcp-down:
 	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service
@@ -500,8 +502,8 @@ mcp-import:
 		$(if $(strip $(IMPORT_SINCE_MS)),--since-ms $(IMPORT_SINCE_MS),)
 
 # Clean benchmark run: preload history, durable log only, no hub fan-out.
-mcp-bench:
-	COMPOSE_PROFILES=mcp LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up --build -d lp-mcp-service
+mcp-bench: mcp-image
+	COMPOSE_PROFILES=mcp LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up -d lp-mcp-service
 
 mcp-test:
 	cd mcp-service && python3 -m pytest -q
