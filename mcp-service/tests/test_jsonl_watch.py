@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from events import AGE_EVENT, LOSS_EVENT, make_age_estimate, make_loss_event
-from jsonl_watch import MARKER_NAME, JsonlWatcher
+from jsonl_watch import JsonlWatcher
 from store import DurableEventStore
 
 SECOND_NS = 1_000_000_000
@@ -80,16 +80,15 @@ class JsonlWatcherTests(unittest.TestCase):
         ranges = [e.payload["age_range"] for e in self.store.read(event_type=AGE_EVENT)]
         self.assertEqual(ranges, ["35-45", "60+"])
 
-    def test_ignores_files_older_than_run_marker(self):
+    def test_ignores_files_older_than_watcher_start(self):
         old = self.results / "rs-1_1__1_old.jsonl"
         new = self.results / "rs-1_1__2_new.jsonl"
         old.write_text(_line(0, [{"id": 1, "age": {"label": "40"}}]), encoding="utf-8")
         new.write_text(_line(0, [{"id": 2, "age": {"label": "20"}}]), encoding="utf-8")
         os.utime(old, (100, 100))
         os.utime(new, (300, 300))
-        (self.results / MARKER_NAME).write_text("200000", encoding="utf-8")
 
-        self.assertEqual(self._watcher(self.store).poll_once(), (1, 0))
+        self.assertEqual(self._watcher(self.store, start_ms=200_000).poll_once(), (1, 0))
         self.assertIsNone(self.store.get_ingest_offset(str(old)))
         self.assertEqual([e.payload["age_range"] for e in self.store.read(event_type=AGE_EVENT)], ["18-25"])
 

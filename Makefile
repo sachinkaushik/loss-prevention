@@ -167,11 +167,6 @@ check-device-env:
 	@echo "[INFO] Validating environment configuration..."
 	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
 		echo "[INFO] LP VLM flow detected - validating OVMS settings"; \
-		for var in RABBITMQ_USER RABBITMQ_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do \
-			if [ -z "$$(printenv $$var)" ]; then \
-				echo "[WARN] $$var is not set; the LP VLM flow needs it (export it before make run-lp)"; \
-			fi; \
-		done; \
 		if [ "$(VLM_BACKEND)" != "ovms" ]; then \
 			echo "[ERROR] VLM_BACKEND must be 'ovms' for LP VLM flow (got: $(VLM_BACKEND))"; \
 			exit 1; \
@@ -209,13 +204,11 @@ check-device-env:
 	fi
 	@echo "[INFO] Environment configuration valid"
 
+# Benchmarks use the same compose file without this profile, so the MCP is excluded there.
+run-lp down-lp: export COMPOSE_PROFILES = mcp
+
 run-lp: validate_workload_mapping update-submodules download-sample-videos
 	@echo "Running loss prevention pipeline"
-	@mkdir -p results
-	@date +%s%3N > results/.lp_mcp_run_started_ms
-	@echo "Starting Loss Prevention MCP service..."
-	@$(MAKE) --no-print-directory -s mcp-up || \
-		echo "[WARN] MCP service did not start; continuing with the pipeline only (retry: make mcp-up)."
 	@LOG_FILE="vlm_loss_prevention.log"; \
 	mkdir -p $$(dirname $$LOG_FILE); \
 	[ -f $$LOG_FILE ] || touch $$LOG_FILE; \
@@ -224,16 +217,10 @@ run-lp: validate_workload_mapping update-submodules download-sample-videos
 	else \
 		$(MAKE) run; \
 	fi
-	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
-		echo "VLM workload detected; the MCP JSONL watcher stays idle for this run."; \
-	else \
-		echo "Pipeline results stream into the MCP automatically (http://localhost:$(LP_MCP_PORT)/mcp)."; \
-	fi
 
 
-down-lp:
-	@echo "Stopping Loss Prevention pipeline and MCP services..."
-	@COMPOSE_PROFILES=mcp docker compose -f src/$(DOCKER_COMPOSE) down
+down-lp:	
+	docker compose -f src/$(DOCKER_COMPOSE) down	
 	@echo "Cleaning up VLM temporary files..."
 	@rm -f vlm_loss_prevention.log
 	@rm -f lp-vlm/lp-vlm.env
@@ -249,6 +236,7 @@ run: validate_workload_mapping download-sample-videos
 		echo "##############Using registry mode - fetching pipeline runner..."; \
 		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up -d; \
 	else \
+		docker compose -f src/$(DOCKER_COMPOSE) build; \
 		LOCAL_UID=$(shell id -u) LOCAL_GID=$(shell id -g) LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) STREAM_LOOP=$(STREAM_LOOP_VALUE) BATCH_SIZE_DETECT=$(BATCH_SIZE_DETECT) BATCH_SIZE_CLASSIFY=$(BATCH_SIZE_CLASSIFY) INFERENCE_INTERVAL=$(INFERENCE_INTERVAL) docker compose -f src/$(DOCKER_COMPOSE) up --build -d; \
 	fi
 
@@ -466,15 +454,16 @@ LP_MCP_PORT ?= 9100
 # The MCP's background watcher reads this camera config and lane for live ingestion.
 LP_LANE ?= lane-1
 export CAMERA_STREAM LP_LANE LP_MCP_PORT
+mcp-build mcp-image mcp-up mcp-down mcp-seed mcp-import mcp-bench: export COMPOSE_PROFILES = mcp
 
 mcp-build:
-	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) build lp-mcp-service
+	@docker compose -f $(MCP_COMPOSE) build lp-mcp-service
 
 # REGISTRY=true (default) pulls intel/lp-mcp:$(LP_TAG); REGISTRY=false builds from mcp-service/.
 mcp-image:
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "Pulling MCP image intel/lp-mcp:$(LP_TAG) from registry..."; \
-		if ! COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) pull -q lp-mcp-service >/dev/null 2>&1; then \
+		if ! docker compose -f $(MCP_COMPOSE) pull -q lp-mcp-service >/dev/null 2>&1; then \
 			echo "MCP image not available in registry; building it locally from mcp-service/..."; \
 			$(MAKE) --no-print-directory mcp-build; \
 		fi; \
@@ -483,11 +472,13 @@ mcp-image:
 		$(MAKE) --no-print-directory mcp-build; \
 	fi
 
+# Start only the MCP service (make run-lp starts it with the rest of the stack).
 mcp-up: mcp-image
-	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) up -d lp-mcp-service
+	@docker compose -f $(MCP_COMPOSE) up -d --no-deps lp-mcp-service
+	@echo "LP MCP service: http://localhost:$(LP_MCP_PORT)/mcp (older results: make mcp-import)"
 
 mcp-down:
-	@COMPOSE_PROFILES=mcp docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service
+	@docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service
 
 mcp-seed:
 	@docker compose -f $(MCP_COMPOSE) exec lp-mcp-service python /app/scripts/seed_demo.py
@@ -501,7 +492,7 @@ mcp-import:
 
 # Clean benchmark run: preload history, durable log only, no hub fan-out.
 mcp-bench: mcp-image
-	COMPOSE_PROFILES=mcp LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up -d lp-mcp-service
+	LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up -d --no-deps lp-mcp-service
 
 mcp-test:
 	cd mcp-service && python3 -m pytest -q

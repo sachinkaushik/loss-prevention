@@ -3,8 +3,8 @@
 Polls `results/rs-*.jsonl`, reads only newline-terminated records, and persists a
 per-file byte offset + sampling window in SQLite so restarts resume without
 duplicates. Files from earlier runs are ignored unless already being tracked:
-a file is picked up only if its mtime is at/after the current run marker
-(`.lp_mcp_run_started_ms`, written by `make run-lp`) and the watcher start time.
+a file is picked up only if its mtime is at/after the watcher start time (the
+container is recreated by `make down-lp` / `run-lp` or a camera-config change).
 VLM runs produce no `rs-*.jsonl`, so the watcher simply stays idle.
 """
 
@@ -21,8 +21,6 @@ from typing import Any
 
 import jsonl_ingest
 from store import DurableEventStore
-
-MARKER_NAME = ".lp_mcp_run_started_ms"
 
 log = logging.getLogger("lp.jsonl_watch")
 
@@ -53,14 +51,6 @@ class JsonlWatcher:
         self._thread: threading.Thread | None = None
         self._config_warned = False
 
-    def _cutoff_ms(self) -> int:
-        try:
-            with open(os.path.join(self.results_dir, MARKER_NAME), encoding="utf-8") as handle:
-                marker = int(handle.read().strip())
-        except (OSError, ValueError):
-            marker = 0
-        return max(marker, self.start_ms)
-
     def _camera_map(self) -> dict[int, dict[str, Any]] | None:
         try:
             with open(self.camera_config_path, encoding="utf-8") as handle:
@@ -81,7 +71,7 @@ class JsonlWatcher:
         cam_map = self._camera_map()
         if cam_map is None:
             return 0, 0
-        cutoff = self._cutoff_ms()
+        cutoff = self.start_ms
         total_age = total_loss = 0
         for path in files:
             try:

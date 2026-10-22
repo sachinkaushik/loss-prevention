@@ -73,28 +73,30 @@ Run the tests:
 
 ## 4. One command up (Docker)
 
-The MCP service is part of the main `src/docker-compose.yml` stack under the
-`mcp` profile and shares that stack's network and result directory. From the
-repository root:
+The MCP service (`lp-mcp-service`) lives in the main `src/docker-compose.yml`
+stack under the `mcp` profile and shares that stack's network and result
+directory. From the repository root:
 
 ```bash
 make run-lp CAMERA_STREAM=camera_to_workload_asc_age_verification.json \
   WORKLOAD_DIST=workload_to_pipeline_asc_age_verification_gpu.json
 ```
 
-`run-lp` enables the profile and starts the pipeline and MCP service in the same
-Compose project, then returns immediately. There is no wait or import step: a
-background watcher inside the MCP service streams this run's results into the
-log every few seconds while the pipeline runs (see section 7). VLM workloads
-produce no JSONL, so the watcher stays idle; their output uses the separate
-RabbitMQ path.
+`run-lp` enables the profile, so one `docker compose up` starts the MCP after the
+pipeline; `make down-lp` stops it with the rest of the stack. `make benchmark` and
+`make benchmark-stream-density` run the file without the profile, so the MCP
+never adds load to measurements and its log survives their `down --volumes`. There is
+no wait or import step: a background watcher inside the MCP service streams
+results written after it starts into the log every few seconds while the
+pipeline runs (see section 7). VLM workloads produce no JSONL, so the watcher
+stays idle; their output uses the separate RabbitMQ path.
 
-To start only the MCP service from the main stack:
+Other MCP commands:
 
 ```bash
-make mcp-up           # main src/docker-compose.yml, MCP profile only
+make mcp-up           # start only the MCP service
 make mcp-seed         # preload demo history
-make mcp-import CAMERA_STREAM=camera_to_workload_asc_age_verification.json  # manual backfill
+make mcp-import CAMERA_STREAM=camera_to_workload_asc_age_verification.json  # backfill older results
 make mcp-down
 ```
 
@@ -160,9 +162,8 @@ How the loss-prevention pipeline emits data depends on the workload:
 
 Offsets and sampling state are persisted in the same SQLite file, so a restart
 resumes where it stopped without duplicates. A file is picked up only if it was
-modified after both the run marker written by `run-lp`
-(`results/.lp_mcp_run_started_ms`) and the watcher's start time, so results
-from earlier runs are never re-attributed to the current camera config.
+modified after the watcher started, so results from earlier runs are never
+re-attributed to the current camera config (`make mcp-import` backfills them).
 
 ### Manual backfill
 `scripts/import_jsonl.py` reuses the same parsing, so its ref_ids match the

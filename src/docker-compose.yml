@@ -357,11 +357,19 @@ services:
     privileged: true
 
   lp-mcp-service:
+    container_name: lp-mcp-service
+    # Enabled by make run-lp / down-lp; benchmarks run this file without it.
     profiles: ["mcp"]
     build:
       context: ../mcp-service
       dockerfile: Dockerfile
     image: intel/lp-mcp:${LP_TAG:-latest}
+    # Start last; the runners already wait on the rest of the stack.
+    depends_on:
+      lp-pipeline-runner:
+        condition: service_started
+      vlm-pipeline-runner:
+        condition: service_started
     ports:
       - "${LP_MCP_PORT:-9100}:9100"
     environment:
