@@ -63,6 +63,17 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(queries.loss_event_count(self.store, lane="lane-1"), 2)
         self.assertEqual(queries.lanes(self.store), ["lane-1", "lane-2"])
 
+    def test_period_range_uses_server_clock(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 22, 11, 34, tzinfo=timezone.utc)  # 17:04 IST
+        start, end = queries.period_range("last_hour", "Asia/Kolkata", now)
+        self.assertEqual((end - start), 3_600_000)
+        start, _ = queries.period_range("today", "Asia/Kolkata", now)
+        self.assertEqual(datetime.fromtimestamp(start / 1000, timezone.utc).isoformat(),
+                         "2026-10-21T18:30:00+00:00")  # IST midnight
+        with self.assertRaises(ValueError):
+            queries.period_range("yesterday", "Asia/Kolkata", now)
+
     def test_item_verifications_and_summary(self):
         for name, matched, ref in (("Green Apple", True, "i1"), ("Mystery Can", False, "i2"),
                                    ("Mystery Can", False, "i3")):

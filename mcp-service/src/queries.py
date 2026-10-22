@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from events import AGE_EVENT, ITEM_EVENT, LOSS_EVENT
@@ -36,6 +36,23 @@ def _to_record(event: Any) -> dict[str, Any]:
         "event_type": event.event_type,
         **event.payload,
     }
+
+
+Period = Literal["last_hour", "today", "last_24_hours"]
+
+
+def period_range(period: str, store_timezone: str, now: datetime | None = None) -> tuple[int, int]:
+    """Resolve a relative period to epoch-ms bounds using the server clock."""
+    now = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(store_timezone))
+    if period == "last_hour":
+        start = now - timedelta(hours=1)
+    elif period == "last_24_hours":
+        start = now - timedelta(hours=24)
+    elif period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        raise ValueError(f"Unknown period '{period}'. Valid values: last_hour, today, last_24_hours.")
+    return int(start.timestamp() * 1000), int(now.timestamp() * 1000)
 
 
 def parse_time_range(

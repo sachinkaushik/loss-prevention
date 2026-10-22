@@ -55,6 +55,20 @@ def _newest(records: list, limit: int) -> list:
     return records[-limit:]
 
 
+_PeriodParam = Annotated[
+    queries.Period | None,
+    Field(description="Relative window computed by the server: 'last_hour', 'today', or "
+                      "'last_24_hours'. Prefer this over start_time/end_time for relative "
+                      "questions; it overrides them."),
+]
+
+
+def _window(start_time: str | None, end_time: str | None, period: str | None) -> tuple[int | None, int | None]:
+    if period:
+        return queries.period_range(period, _settings.store_timezone)
+    return queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+
+
 def _validate_scenario(scenario: str | None) -> None:
     """Fail loudly on an unknown scenario; a silent [] reads as 'no loss events'."""
     if not scenario:
@@ -189,11 +203,12 @@ def Get_loss_history(
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     limit: _LimitParam = _DEFAULT_LIMIT,
+    period: _PeriodParam = None,
 ) -> list[LossEvent]:
     """List the most recent loss events, optionally filtered by scenario/lane/time."""
     _validate_scenario(scenario)
     _validate_lane(lane)
-    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    start_ms, end_ms = _window(start_time, end_time, period)
     return _newest(queries.loss_history(store, scenario, lane, start_ms, end_ms), limit)
 
 
@@ -210,6 +225,7 @@ def Get_age_range_counts(
     lane: Annotated[
         str | None, Field(description="Optional lane id to scope the counts.")
     ] = None,
+    period: _PeriodParam = None,
 ) -> list[AgeRangeCount]:
     """Count sampled age detections by age range over a period (feeds signage decisions).
 
@@ -217,7 +233,7 @@ def Get_age_range_counts(
     camera), not unique people: report them as detections, never as people or customers.
     """
     _validate_lane(lane)
-    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    start_ms, end_ms = _window(start_time, end_time, period)
     return queries.age_range_counts(store, start_ms, end_ms, lane)
 
 
@@ -235,11 +251,12 @@ def Get_loss_event_count(
         str | None,
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
+    period: _PeriodParam = None,
 ) -> int:
     """Return a compact count of loss events matching the supplied filters."""
     _validate_scenario(scenario)
     _validate_lane(lane)
-    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    start_ms, end_ms = _window(start_time, end_time, period)
     return queries.loss_event_count(store, scenario, lane, start_ms, end_ms)
 
 
@@ -266,6 +283,7 @@ def Get_item_verifications(
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
     limit: _LimitParam = _DEFAULT_LIMIT,
+    period: _PeriodParam = None,
 ) -> list[ItemVerification]:
     """List items the VLM identified at self-checkout and whether each is in the store inventory.
 
@@ -273,7 +291,7 @@ def Get_item_verifications(
     is not in the inventory list (unknown or unexpected product).
     """
     _validate_lane(lane)
-    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    start_ms, end_ms = _window(start_time, end_time, period)
     return _newest(queries.item_verifications(store, matched, lane, start_ms, end_ms), limit)
 
 
@@ -288,8 +306,9 @@ def Get_item_verification_summary(
         str | None,
         Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
     ] = None,
+    period: _PeriodParam = None,
 ) -> ItemVerificationSummary:
     """Count VLM-verified items that matched vs did not match the inventory, with unmatched names."""
     _validate_lane(lane)
-    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    start_ms, end_ms = _window(start_time, end_time, period)
     return queries.item_verification_summary(store, lane, start_ms, end_ms)
