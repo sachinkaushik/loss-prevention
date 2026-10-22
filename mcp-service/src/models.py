@@ -41,3 +41,25 @@ class AgeRangeCount(TypedDict):
 
     age_range: str
     detections: int
+
+
+class ItemVerification(TypedDict):
+    """One VLM-identified item and whether it is in the store inventory."""
+
+    ref_id: str
+    ts_ms: int
+    timestamp: str
+    event_type: str
+    item_name: str
+    matched: bool
+    lane: str
+    camera_id: str
+
+
+class ItemVerificationSummary(TypedDict):
+    """Matched vs unmatched item counts over the queried period."""
+
+    total: int
+    matched: int
+    unmatched: int
+    unmatched_items: list[str]

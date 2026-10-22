@@ -176,3 +176,49 @@ def ingest_file(
         record_loss(event["scenario"], lane, camera_id, tracking_id=event["tracking_id"],
                     ref_id=event["ref_id"], ts_ms=ts_ms)
     return new_offset, last_window, len(age_events), len(loss_events)
+
+
+def vlm_items_from_results(lines: list[str]) -> list[dict[str, Any]] | None:
+    """Final per-item verdicts from a VLM results file, or None until the run finishes.
+
+    The handler appends `od_results`, `vlm_results`, then `agent_results`; a run is
+    complete once `agent_results` exists. Agent verdicts win; VLM items the agent
+    dropped (e.g. a failed agent call) fall back to their VLM verdict.
+    """
+    sections: dict[str, list] = {}
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            for key in ("vlm_results", "agent_results"):
+                if isinstance(record.get(key), list):
+                    sections[key] = record[key]
+    if "agent_results" not in sections:
+        return None
+    items: dict[str, bool] = {}
+    for key in ("vlm_results", "agent_results"):
+        for entry in sections.get(key, []):
+            if isinstance(entry, dict) and str(entry.get("item_name", "")).strip():
+                items[str(entry["item_name"]).strip()] = bool(entry.get("match"))
+    return [{"item_name": name, "matched": matched} for name, matched in items.items()]
+
+
+def ingest_vlm_results(
+    path: str | Path,
+    camera_id: str,
+    lane: str,
+    record_item: Callable[..., Any],
+) -> int | None:
+    """Record one item_verification per item; returns the count, or None if not finished."""
+    lines, _ = read_complete_lines(path, 0)
+    items = vlm_items_from_results(lines)
+    if items is None:
+        return None
+    stem = Path(path).stem
+    ts_ms = int(os.path.getmtime(path) * 1000)
+    for item in items:
+        record_item(item["item_name"], item["matched"], lane, camera_id,
+                    ref_id=f"{stem}-item-{item['item_name']}", ts_ms=ts_ms)
+    return len(items)

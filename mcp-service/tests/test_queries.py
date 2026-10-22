@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 import queries
-from events import make_age_estimate, make_loss_event
+from events import make_age_estimate, make_item_verification, make_loss_event
 from store import DurableEventStore
 
 
@@ -62,6 +62,15 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(queries.loss_event_count(self.store), 3)
         self.assertEqual(queries.loss_event_count(self.store, lane="lane-1"), 2)
         self.assertEqual(queries.lanes(self.store), ["lane-1", "lane-2"])
+
+    def test_item_verifications_and_summary(self):
+        for name, matched, ref in (("Green Apple", True, "i1"), ("Mystery Can", False, "i2"),
+                                   ("Mystery Can", False, "i3")):
+            self.store.append(make_item_verification("store_001", name, matched, "lane-1", ref_id=ref))
+        self.assertEqual([r["ref_id"] for r in queries.item_verifications(self.store, matched=False)],
+                         ["i2", "i3"])
+        self.assertEqual(queries.item_verification_summary(self.store),
+                         {"total": 3, "matched": 1, "unmatched": 2, "unmatched_items": ["Mystery Can"]})
 
 
 if __name__ == "__main__":

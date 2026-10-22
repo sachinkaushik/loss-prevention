@@ -17,14 +17,16 @@ from config import configured_lanes, get_settings
 from delivery import push_event_to_hub
 from events import (
     AGE_EVENT,
+    ITEM_EVENT,
     LOSS_EVENT,
     SCENARIOS,
     SCHEMAS,
     EventEnvelope,
     make_age_estimate,
+    make_item_verification,
     make_loss_event,
 )
-from models import AgeEstimate, AgeRangeCount, LossEvent
+from models import AgeEstimate, AgeRangeCount, ItemVerification, ItemVerificationSummary, LossEvent
 from queries import SEVERITY_RANK
 from store import DurableEventStore
 
@@ -130,6 +132,20 @@ def record_age_estimate(
     ))
 
 
+def record_item_verification(
+    item_name: str,
+    matched: bool,
+    lane: str,
+    camera_id: str = "",
+    ref_id: str | None = None,
+    ts_ms: int | None = None,
+) -> EventEnvelope:
+    """Ingest one VLM item verification (lp_vlm workload)."""
+    return _commit(make_item_verification(
+        _settings.store_id, item_name, matched, lane, camera_id, ref_id, ts_ms,
+    ))
+
+
 @mcp.tool(annotations={"readOnlyHint": True})
 def describe() -> dict:
     """Describe the service: event types, schemas, and available read tools."""
@@ -137,12 +153,18 @@ def describe() -> dict:
         "service": "loss_prevention",
         "store_id": _settings.store_id,
         "use_case": _settings.use_case,
-        "event_types": {LOSS_EVENT: SCHEMAS[LOSS_EVENT], AGE_EVENT: SCHEMAS[AGE_EVENT]},
+        "event_types": {
+            LOSS_EVENT: SCHEMAS[LOSS_EVENT],
+            AGE_EVENT: SCHEMAS[AGE_EVENT],
+            ITEM_EVENT: SCHEMAS[ITEM_EVENT],
+        },
         "read_tools": [
             "Get_loss_history",
             "Get_age_range_counts",
             "Get_loss_event_count",
             "Get_lanes",
+            "Get_item_verifications",
+            "Get_item_verification_summary",
         ],
         "act_tools": [],
         "subscribe": "disabled",
@@ -226,3 +248,48 @@ def Get_lanes() -> list[str]:
     """List lanes that have recorded loss activity (configured lanes included)."""
     configured = configured_lanes(_settings.lane_config_path)
     return sorted(set(configured) | set(queries.lanes(store))) if configured else queries.lanes(store)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def Get_item_verifications(
+    matched: Annotated[
+        bool | None,
+        Field(description="Optional: true = in inventory, false = not in inventory."),
+    ] = None,
+    lane: Annotated[str | None, Field(description="Optional lane id to filter by.")] = None,
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+    limit: _LimitParam = _DEFAULT_LIMIT,
+) -> list[ItemVerification]:
+    """List items the VLM identified at self-checkout and whether each is in the store inventory.
+
+    Produced only by the VLM (lp_vlm) workload; `matched` = false means the item
+    is not in the inventory list (unknown or unexpected product).
+    """
+    _validate_lane(lane)
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    return _newest(queries.item_verifications(store, matched, lane, start_ms, end_ms), limit)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def Get_item_verification_summary(
+    lane: Annotated[str | None, Field(description="Optional lane id to filter by.")] = None,
+    start_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+    end_time: Annotated[
+        str | None,
+        Field(description=f"Inclusive ISO datetime; local values use {_settings.store_timezone}."),
+    ] = None,
+) -> ItemVerificationSummary:
+    """Count VLM-verified items that matched vs did not match the inventory, with unmatched names."""
+    _validate_lane(lane)
+    start_ms, end_ms = queries.parse_time_range(start_time, end_time, _settings.store_timezone)
+    return queries.item_verification_summary(store, lane, start_ms, end_ms)

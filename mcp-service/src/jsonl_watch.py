@@ -5,7 +5,8 @@ per-file byte offset + sampling window in SQLite so restarts resume without
 duplicates. Files from earlier runs are ignored unless already being tracked:
 a file is picked up only if its mtime is at/after the watcher start time (the
 container is recreated by `make down-lp` / `run-lp` or a camera-config change).
-VLM runs produce no `rs-*.jsonl`, so the watcher simply stays idle.
+VLM runs (lp_vlm) write `vlm-results/results_*.jsonl`; each finished run becomes
+one `item_verification` event per identified item.
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ class JsonlWatcher:
         sample_seconds: float = 1.0,
         poll_seconds: float = 2.0,
         start_ms: int | None = None,
+        record_item: Callable[..., Any] | None = None,
+        vlm_results_dir: str | None = None,
     ) -> None:
         self.store = store
         self.results_dir = results_dir
@@ -44,6 +47,8 @@ class JsonlWatcher:
         self.lane = lane
         self.record_age = record_age
         self.record_loss = record_loss
+        self.record_item = record_item
+        self.vlm_results_dir = vlm_results_dir or os.path.join(results_dir, "vlm-results")
         self.sample_ns = int(sample_seconds * 1_000_000_000)
         self.poll_seconds = poll_seconds
         self.start_ms = start_ms if start_ms is not None else int(time.time() * 1000)
@@ -104,13 +109,45 @@ class JsonlWatcher:
             total_loss += n_loss
         return total_age, total_loss
 
+    def poll_vlm_once(self) -> int:
+        """Ingest finished VLM runs (results_*.jsonl) as item_verification events."""
+        if self.record_item is None:
+            return 0
+        files = sorted(glob(os.path.join(self.vlm_results_dir, "results_*.jsonl")))
+        if not files:
+            return 0
+        cam_map = self._camera_map() or {}
+        camera_id = next(
+            (c["camera_id"] for c in cam_map.values() if "lp_vlm" in c["workloads"]), ""
+        )
+        total = 0
+        for path in files:
+            try:
+                size = os.path.getsize(path)
+                mtime_ms = int(os.path.getmtime(path) * 1000)
+            except OSError:
+                continue
+            state = self.store.get_ingest_offset(path)
+            if (state is None and mtime_ms < self.start_ms) or (state and state[0] == size):
+                continue
+            try:
+                count = jsonl_ingest.ingest_vlm_results(path, camera_id, self.lane, self.record_item)
+            except OSError:
+                continue
+            if count is not None:
+                self.store.set_ingest_offset(path, size, None)
+                total += count
+        return total
+
     def run(self) -> None:
         log.info("Watching %s for pipeline metadata (lane %s).", self.results_dir, self.lane)
         while not self._stop.is_set():
             try:
                 n_age, n_loss = self.poll_once()
-                if n_age or n_loss:
-                    log.info("Ingested %d age estimates, %d loss events.", n_age, n_loss)
+                n_items = self.poll_vlm_once()
+                if n_age or n_loss or n_items:
+                    log.info("Ingested %d age estimates, %d loss events, %d item verifications.",
+                             n_age, n_loss, n_items)
             except Exception:  # keep the watcher alive; the MCP server must stay up
                 log.exception("JSONL watcher poll failed")
             self._stop.wait(self.poll_seconds)

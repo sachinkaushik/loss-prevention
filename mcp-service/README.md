@@ -10,12 +10,13 @@ the signage-board decision; the loss history feeds operator review.
 
 ## 1. Events
 
-Two event types share one durable, ordered log.
+Three event types share one durable, ordered log.
 
 | Event | Payload |
 |---|---|
 | `loss_event` | `scenario`, `lane`, `camera_id`, `severity`, `tracking_id`, `frame`, `description` |
 | `age_estimate` | `age_range`, `lane`, `camera_id`, `tracking_id`, `gender`, `frame` |
+| `item_verification` | `item_name`, `matched` (in store inventory), `lane`, `camera_id` (VLM workload only) |
 
 `scenario` is one of: `items_in_basket`, `hidden_items`, `fake_scan_detection`,
 `multi_product_identification`, `product_switching`, `sweethearting`.
@@ -47,6 +48,8 @@ EventEnvelope(event_type, service="loss_prevention", store_id, payload,
 | `Get_age_range_counts` | `start_time?`, `end_time?`, `lane?` | sampled detections grouped by age range (not unique people) |
 | `Get_loss_event_count` | `scenario?`, `lane?`, `start_time?`, `end_time?` | compact count |
 | `Get_lanes` | — | lanes with recorded loss activity |
+| `Get_item_verifications` | `matched?`, `lane?`, `start_time?`, `end_time?`, `limit?` | VLM-identified items and whether each is in inventory |
+| `Get_item_verification_summary` | `lane?`, `start_time?`, `end_time?` | matched / unmatched counts + unmatched item names |
 
 Time values are ISO-8601; naive values use `LP_TIMEZONE`.
 
@@ -88,8 +91,8 @@ pipeline; `make down-lp` stops it with the rest of the stack. `make benchmark` a
 never adds load to measurements and its log survives their `down --volumes`. There is
 no wait or import step: a background watcher inside the MCP service streams
 results written after it starts into the log every few seconds while the
-pipeline runs (see section 7). VLM workloads produce no JSONL, so the watcher
-stays idle; their output uses the separate RabbitMQ path.
+pipeline runs (see section 7). VLM runs are ingested from their results file
+once each run finishes.
 
 
 ## 5. Configuration
@@ -131,8 +134,11 @@ How the loss-prevention pipeline emits data depends on the workload:
 - **Non-VLM workloads** (age verification, object detection/classification, loss
   scenarios) publish via `gvametapublish file-format=json-lines` to per-camera
   files `results/rs-*.jsonl`. This is the primary ingestion source.
-- **VLM workload** (`lp_vlm`) publishes to RabbitMQ `object_detection` through a
-  `gvapython` step; a RabbitMQ consumer can be added later for that path only.
+- **VLM workload** (`lp_vlm`) refines generic detections with the VLM and checks
+  each item against the store inventory. When a run finishes, the handler's
+  `results/vlm-results/results_*.jsonl` (with `od_results`, `vlm_results`,
+  `agent_results`) becomes one `item_verification` per item: the agent verdict
+  wins, falling back to the VLM verdict. Ingestion is per finished run, not live.
 
 ### Live ingestion (non-VLM)
 `src/jsonl_watch.py` runs as a background thread in the MCP server. Every

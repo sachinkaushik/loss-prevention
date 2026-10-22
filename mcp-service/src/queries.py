@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from events import AGE_EVENT, LOSS_EVENT
-from models import AgeRangeCount
+from events import AGE_EVENT, ITEM_EVENT, LOSS_EVENT
+from models import AgeRangeCount, ItemVerificationSummary
 
 _MAX = 10_000
 SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -140,6 +140,41 @@ def loss_event_count(
 def lanes(log: Any) -> list[str]:
     """Distinct lane ids that have any loss activity."""
     return sorted({str(record["lane"]) for record in loss_history(log) if record.get("lane")})
+
+
+def item_verifications(
+    log: Any,
+    matched: bool | None = None,
+    lane: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+) -> list[dict[str, Any]]:
+    """VLM item verifications, optionally filtered by match result and lane, oldest first."""
+    out: list[dict[str, Any]] = []
+    for record in _iter_records(log, ITEM_EVENT, start_ms, end_ms):
+        if matched is not None and bool(record.get("matched")) != matched:
+            continue
+        if lane and str(record.get("lane")) != str(lane):
+            continue
+        out.append(record)
+    return out
+
+
+def item_verification_summary(
+    log: Any,
+    lane: str | None = None,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+) -> ItemVerificationSummary:
+    """Matched/unmatched counts plus the distinct unmatched item names."""
+    records = item_verifications(log, None, lane, start_ms, end_ms)
+    unmatched = [r for r in records if not r.get("matched")]
+    return {
+        "total": len(records),
+        "matched": len(records) - len(unmatched),
+        "unmatched": len(unmatched),
+        "unmatched_items": sorted({str(r.get("item_name", "")) for r in unmatched}),
+    }
 
 
 def all_scenarios(log: Any) -> set[str]:

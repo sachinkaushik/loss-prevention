@@ -1,9 +1,10 @@
 """Loss Prevention event schema and envelope construction.
 
-Two event types flow through one durable log:
+Three event types flow through one durable log:
 
 - ``loss_event`` — a self-checkout loss scenario detected on a lane.
 - ``age_estimate`` — an age-range classification (feeds the signage board).
+- ``item_verification`` — a VLM-identified item checked against the inventory.
 
 Builders write an envelope; the store persists it first, then delivery fans
 committed envelopes out to the agent hub.
@@ -18,6 +19,7 @@ from typing import Any
 
 LOSS_EVENT = "loss_event"
 AGE_EVENT = "age_estimate"
+ITEM_EVENT = "item_verification"
 SERVICE = "loss_prevention"
 
 # Known self-checkout loss scenarios (one per lane camera in the 6-cam lane).
@@ -49,7 +51,16 @@ AGE_SCHEMA: dict[str, str] = {
     "frame": "str",         # object-store URI for the face frame
 }
 
-SCHEMAS: dict[str, dict[str, str]] = {LOSS_EVENT: LOSS_SCHEMA, AGE_EVENT: AGE_SCHEMA}
+ITEM_SCHEMA: dict[str, str] = {
+    "item_name": "str",    # VLM-identified product, e.g. Coca-Cola Bottle Large
+    "matched": "bool",     # True when the item is in the store inventory list
+    "lane": "str",         # lane identifier
+    "camera_id": "str",    # camera running the lp_vlm workload
+}
+
+SCHEMAS: dict[str, dict[str, str]] = {
+    LOSS_EVENT: LOSS_SCHEMA, AGE_EVENT: AGE_SCHEMA, ITEM_EVENT: ITEM_SCHEMA,
+}
 
 
 @dataclass(frozen=True)
@@ -126,6 +137,30 @@ def make_age_estimate(
             "tracking_id": str(tracking_id),
             "gender": gender.lower(),
             "frame": frame,
+        },
+        ref_id=ref_id or uuid.uuid4().hex,
+        ts_ms=ts_ms if ts_ms is not None else int(time.time() * 1000),
+    )
+
+
+def make_item_verification(
+    store_id: str,
+    item_name: str,
+    matched: bool,
+    lane: str,
+    camera_id: str = "",
+    ref_id: str | None = None,
+    ts_ms: int | None = None,
+) -> EventEnvelope:
+    return EventEnvelope(
+        event_type=ITEM_EVENT,
+        service=SERVICE,
+        store_id=store_id,
+        payload={
+            "item_name": item_name,
+            "matched": bool(matched),
+            "lane": str(lane),
+            "camera_id": camera_id,
         },
         ref_id=ref_id or uuid.uuid4().hex,
         ts_ms=ts_ms if ts_ms is not None else int(time.time() * 1000),

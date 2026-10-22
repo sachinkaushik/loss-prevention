@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from events import AGE_EVENT, LOSS_EVENT, make_age_estimate, make_loss_event
+from events import AGE_EVENT, ITEM_EVENT, LOSS_EVENT, make_age_estimate, make_item_verification, make_loss_event
 from jsonl_watch import JsonlWatcher
 from store import DurableEventStore
 
@@ -45,8 +45,34 @@ class JsonlWatcherTests(unittest.TestCase):
         def record_loss(scenario, lane, camera_id, **kwargs):
             store.append_once(make_loss_event("store_001", scenario, lane, camera_id, **kwargs))
 
+        def record_item(item_name, matched, lane, camera_id, **kwargs):
+            store.append_once(make_item_verification("store_001", item_name, matched, lane, camera_id, **kwargs))
+
         return JsonlWatcher(store, str(self.results), str(self.config_path), "lane-1",
-                            record_age, record_loss, sample_seconds=1.0, start_ms=start_ms)
+                            record_age, record_loss, sample_seconds=1.0, start_ms=start_ms,
+                            record_item=record_item)
+
+    def test_vlm_results_become_item_verifications_once_finished(self):
+        self.config_path.write_text(json.dumps({"lane_config": {"cameras": [
+            {"camera_id": "cam1", "workloads": ["lp_vlm"]}]}}), encoding="utf-8")
+        vlm_dir = self.results / "vlm-results"
+        vlm_dir.mkdir()
+        path = vlm_dir / "results_20261022111838.jsonl"
+        path.write_text(json.dumps({"vlm_results": [
+            {"item_name": "Green Apple", "match": True},
+            {"item_name": "Mystery Can", "match": False}]}) + "\n", encoding="utf-8")
+        watcher = self._watcher(self.store)
+
+        self.assertEqual(watcher.poll_vlm_once(), 0)  # run not finished yet
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"agent_results": [{"item_name": "Green Apple", "match": True}]}) + "\n")
+        self.assertEqual(watcher.poll_vlm_once(), 2)
+        self.assertEqual(watcher.poll_vlm_once(), 0)  # unchanged file is not re-read
+
+        events = self.store.read(event_type=ITEM_EVENT)
+        self.assertEqual({(e.payload["item_name"], e.payload["matched"]) for e in events},
+                         {("Green Apple", True), ("Mystery Can", False)})
+        self.assertEqual({e.payload["camera_id"] for e in events}, {"cam1"})
 
     def test_ingests_incrementally_and_waits_for_partial_lines(self):
         path = self.results / "rs-1_1__1_2026.jsonl"

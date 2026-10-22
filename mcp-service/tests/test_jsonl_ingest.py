@@ -43,6 +43,20 @@ class JsonlIngestTests(unittest.TestCase):
         self.assertEqual(mapping[0]["camera_id"], "cam1")
         self.assertEqual(mapping[1]["workloads"], ["hidden_items"])
 
+    def test_vlm_items_wait_for_agent_results_and_merge_verdicts(self):
+        od = json.dumps({"od_results": [{"item_name": "bottle", "match": False}]})
+        vlm = json.dumps({"vlm_results": [
+            {"item_name": "Coca-Cola Bottle Large", "match": True},
+            {"item_name": "Mystery Can", "match": False},
+        ]})
+        agent = json.dumps({"agent_results": [{"item_name": "Coca-Cola Bottle Large", "match": True}]})
+        self.assertIsNone(jsonl_ingest.vlm_items_from_results([od, vlm]))
+        items = jsonl_ingest.vlm_items_from_results([od, vlm, agent])
+        self.assertEqual(items, [
+            {"item_name": "Coca-Cola Bottle Large", "matched": True},
+            {"item_name": "Mystery Can", "matched": False},
+        ])
+
     def test_read_complete_lines_leaves_partial_line(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rs-1_1__1_2026.jsonl"
