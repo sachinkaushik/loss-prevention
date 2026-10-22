@@ -348,7 +348,7 @@ services:
     volumes:
       - ../models:/home/pipeline-server/models
       - ../performance-tools/sample-media:/home/pipeline-server/sample-media
-      - ${LP_RESULTS_HOST:-../results}:/home/pipeline-server/results
+      - ${RESULTS_DIR:-../results}:/home/pipeline-server/results
       - ../configs:/home/pipeline-server/configs
       - ../src/pipelines:/home/pipeline-server/pipelines
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -383,7 +383,7 @@ services:
       SEED_DEMO: ${SEED_DEMO:-false}
     volumes:
       - lp_mcp_data:/data
-      - ${LP_RESULTS_HOST:-../results}:/results:ro
+      - ${RESULTS_DIR:-../results}:/results:ro
       - ../configs:/configs:ro
     networks:
       - my_network

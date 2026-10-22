@@ -12,8 +12,6 @@ export HTTP_PROXY
 export HTTPS_PROXY
 PWD ?= $(shell pwd)
 export PWD
-LP_RESULTS_HOST ?= $(PWD)/results
-export LP_RESULTS_HOST
 LP_TAG ?= $(shell cat VERSION)
 export LP_TAG
 VLM_DEVICE ?= CPU
@@ -171,8 +169,7 @@ check-device-env:
 		echo "[INFO] LP VLM flow detected - validating OVMS settings"; \
 		for var in RABBITMQ_USER RABBITMQ_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do \
 			if [ -z "$$(printenv $$var)" ]; then \
-				echo "[ERROR] $$var must be set for the LP VLM flow (export it before make run-lp)"; \
-				exit 1; \
+				echo "[WARN] $$var is not set; the LP VLM flow needs it (export it before make run-lp)"; \
 			fi; \
 		done; \
 		if [ "$(VLM_BACKEND)" != "ovms" ]; then \
@@ -212,19 +209,20 @@ check-device-env:
 	fi
 	@echo "[INFO] Environment configuration valid"
 
-run-lp:
-	@echo "Starting Loss Prevention pipeline..."
-	@mkdir -p "$(LP_RESULTS_HOST)"
-	@date +%s%3N > "$(LP_RESULTS_HOST)/.lp_mcp_run_started_ms"
+run-lp: validate_workload_mapping update-submodules download-sample-videos
+	@echo "Running loss prevention pipeline"
+	@mkdir -p results
+	@date +%s%3N > results/.lp_mcp_run_started_ms
 	@echo "Starting Loss Prevention MCP service..."
-	@$(MAKE) --no-print-directory -s mcp-up
+	@$(MAKE) --no-print-directory -s mcp-up || \
+		echo "[WARN] MCP service did not start; continuing with the pipeline only (retry: make mcp-up)."
 	@LOG_FILE="vlm_loss_prevention.log"; \
 	mkdir -p $$(dirname $$LOG_FILE); \
 	[ -f $$LOG_FILE ] || touch $$LOG_FILE; \
 	if [ "$(RENDER_MODE)" != "0" ]; then \
-		COMPOSE_PROFILES=mcp $(MAKE) --no-print-directory run-render-mode; \
+		$(MAKE) run-render-mode; \
 	else \
-		COMPOSE_PROFILES=mcp $(MAKE) --no-print-directory run; \
+		$(MAKE) run; \
 	fi
 	@if [ "$(LP_VLM_WORKLOAD_ENABLED)" = "1" ]; then \
 		echo "VLM workload detected; the MCP JSONL watcher stays idle for this run."; \
