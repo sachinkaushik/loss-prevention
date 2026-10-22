@@ -91,20 +91,6 @@ results written after it starts into the log every few seconds while the
 pipeline runs (see section 7). VLM workloads produce no JSONL, so the watcher
 stays idle; their output uses the separate RabbitMQ path.
 
-Other MCP commands:
-
-```bash
-make mcp-up           # start only the MCP service
-make mcp-seed         # preload demo history
-make mcp-import CAMERA_STREAM=camera_to_workload_asc_age_verification.json  # backfill older results
-make mcp-down
-```
-
-Clean benchmark run (durable log only, no hub fan-out):
-
-```bash
-make mcp-bench
-```
 
 ## 5. Configuration
 
