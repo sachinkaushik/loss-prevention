@@ -81,6 +81,7 @@ REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(LP_TAG)
 
 VLM_LOGS_FILE ?= $(PWD)/vlm_loss_prevention.log
 LP_VLM_WORKLOAD_ENABLED := $(shell python3 lp-vlm/src/workload_utils.py --camera-config configs/$(CAMERA_STREAM) --has-lp-vlm)
+export LP_VLM_WORKLOAD_ENABLED
 
 # Set STREAM_LOOP based on LP_VLM_WORKLOAD_ENABLED
 ifeq ($(LP_VLM_WORKLOAD_ENABLED),1)
@@ -212,6 +213,9 @@ check-device-env:
 		fi; \
 	fi
 	@echo "[INFO] Environment configuration valid"
+
+# Benchmarks use the same compose file without this profile, so the MCP is excluded there.
+run-lp down-lp: export COMPOSE_PROFILES = mcp
 
 run-lp: validate_workload_mapping update-submodules download-sample-videos
 	@echo "Running loss prevention pipeline"
@@ -481,3 +485,55 @@ plot-metrics:
 	python3 usage_graph_plot.py --dir "$$TARGET_DIR" && \
 	deactivate \
 	)
+
+# ---------- Loss Prevention MCP sensor service ----------
+.PHONY: mcp-build mcp-image mcp-up mcp-down mcp-seed mcp-bench mcp-test mcp-import
+
+MCP_COMPOSE ?= src/$(DOCKER_COMPOSE)
+LP_MCP_PORT ?= 9100
+# The MCP's background watcher reads this camera config and lane for live ingestion.
+LP_LANE ?= lane-1
+export CAMERA_STREAM LP_LANE LP_MCP_PORT
+mcp-build mcp-image mcp-up mcp-down mcp-seed mcp-import mcp-bench: export COMPOSE_PROFILES = mcp
+
+mcp-build:
+	@docker compose -f $(MCP_COMPOSE) build lp-mcp-service
+
+# REGISTRY=true (default) pulls intel/lp-mcp:$(LP_TAG); REGISTRY=false builds from mcp-service/.
+mcp-image:
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Pulling MCP image intel/lp-mcp:$(LP_TAG) from registry..."; \
+		if ! docker compose -f $(MCP_COMPOSE) pull -q lp-mcp-service >/dev/null 2>&1; then \
+			echo "MCP image not available in registry; building it locally from mcp-service/..."; \
+			$(MAKE) --no-print-directory mcp-build; \
+		fi; \
+	else \
+		echo "Building MCP image locally from mcp-service/..."; \
+		$(MAKE) --no-print-directory mcp-build; \
+	fi
+
+# Start only the MCP service (make run-lp starts it with the rest of the stack).
+mcp-up: mcp-image
+	@docker compose -f $(MCP_COMPOSE) up -d --no-deps lp-mcp-service
+	@echo "LP MCP service: http://localhost:$(LP_MCP_PORT)/mcp (older results: make mcp-import)"
+
+mcp-down:
+	@docker compose -f $(MCP_COMPOSE) rm -sf lp-mcp-service
+
+mcp-seed:
+	@docker compose -f $(MCP_COMPOSE) exec lp-mcp-service python /app/scripts/seed_demo.py
+
+# Manual backfill of non-VLM JSONL output (live runs are ingested by the watcher).
+mcp-import:
+	@docker compose -f $(MCP_COMPOSE) exec lp-mcp-service \
+		python /app/scripts/import_jsonl.py --results-dir /results \
+		--camera-config /configs/$(CAMERA_STREAM) --lane $(LP_LANE) \
+		$(if $(strip $(IMPORT_SINCE_MS)),--since-ms $(IMPORT_SINCE_MS),)
+
+# Clean benchmark run: preload history, durable log only, no hub fan-out.
+mcp-bench: mcp-image
+	LP_EVENT_DELIVERY=off SEED_DEMO=true docker compose -f $(MCP_COMPOSE) up -d --no-deps lp-mcp-service
+
+mcp-test:
+	cd mcp-service && python3 -m pytest -q
+
