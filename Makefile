@@ -90,6 +90,16 @@ else
 	STREAM_LOOP_VALUE := true
 endif
 
+PRINT_CAMERA_ABOUT = print_camera_about() { \
+	python3 -c 'import json, sys; \
+exec("try:\n    with open(sys.argv[1], encoding=\"utf-8\") as config_file:\n        config = json.load(config_file)\nexcept (OSError, ValueError):\n    config = {}"); \
+about = config.get("_about", {}) if isinstance(config, dict) else {}; \
+about = about if isinstance(about, dict) else {}; \
+fields = (("name", "Scenario"), ("summary", "Summary"), ("cameras", "Cameras"), ("why_run_it", "Why run it")); \
+lines = [label + ": " + str(about[key]) for key, label in fields if about.get(key)]; \
+print("Camera config _about:\n" + "\n".join(lines)) if lines else None' "$$1"; \
+}
+
 check-models:
 	@chmod +x check_models.sh
 	@./check_models.sh models || true
@@ -227,6 +237,8 @@ down-lp:
 	@echo "VLM cleanup completed"
 
 run: validate_workload_mapping download-sample-videos
+	@$(PRINT_CAMERA_ABOUT); \
+	print_camera_about "configs/$(CAMERA_STREAM)"
 	@echo "Setting up environment for STREAM_LOOP..."
 	@mkdir -p results results/vlm-results
 	@LOG_FILE="vlm_loss_prevention.log"; \
@@ -250,6 +262,8 @@ run-render-mode: validate_workload_mapping download-sample-videos
 	@echo "Using DISPLAY=$(DISPLAY)"
 	@echo "Using config file: configs/$(CAMERA_STREAM)"
 	@echo "Using workload config: configs/$(WORKLOAD_DIST)"
+	@$(PRINT_CAMERA_ABOUT); \
+	print_camera_about "configs/$(CAMERA_STREAM)"
 	@xhost +local:docker
 	@LOG_FILE="vlm_loss_prevention.log"; \
 		mkdir -p $$(dirname $$LOG_FILE); \
@@ -279,8 +293,15 @@ build-benchmark:
 	fi
 
 benchmark: build-benchmark download-sample-videos download-models
-	mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
+	@$(PRINT_CAMERA_ABOUT); \
+	print_camera_about "configs/$(CAMERA_STREAM)"
+	@mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
 	[ -f $(VLM_LOGS_FILE) ] || touch $(VLM_LOGS_FILE); \
+	RUN_TAG=$$(python3 src/validate-configs.py --get-run-tag --camera-config configs/$(CAMERA_STREAM) --pipeline-config configs/$(WORKLOAD_DIST) 2>/dev/null || echo "default__unknown"); \
+	RUN_TIMESTAMP=$$(date +%Y-%m-%dT%H-%M-%S); \
+	RUN_DIR="$(RESULTS_DIR)/$${RUN_TAG}__$${RUN_TIMESTAMP}"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "Running benchmark in: $$RUN_DIR"; \
 	cd performance-tools/benchmark-scripts && \
 	export MULTI_STREAM_MODE=1 && \
 	export LP_VLM_WORKLOAD_ENABLED=$(LP_VLM_WORKLOAD_ENABLED) && \
@@ -292,7 +313,7 @@ benchmark: build-benchmark download-sample-videos download-models
 		python3 benchmark.py \
 			--compose_file ../../src/$(DOCKER_COMPOSE) \
 			--pipelines $(PIPELINE_COUNT) \
-			--results_dir $(RESULTS_DIR) \
+			--results_dir "$$RUN_DIR" \
 			$$(if [ "$(REGISTRY)" = "true" ]; then echo "--benchmark_type=reg"; fi); \
 		deactivate \
 	)
@@ -300,6 +321,8 @@ benchmark: build-benchmark download-sample-videos download-models
 
 
 benchmark-stream-density: build-benchmark download-sample-videos download-models
+	@$(PRINT_CAMERA_ABOUT); \
+	print_camera_about "configs/$(CAMERA_STREAM)"
 	@if [ "$(OOM_PROTECTION)" = "0" ]; then \
         echo "╔════════════════════════════════════════════════════════════╗";\
 		echo "║ WARNING                                                    ║";\
@@ -313,8 +336,13 @@ benchmark-stream-density: build-benchmark download-sample-videos download-models
 		echo "╚════════════════════════════════════════════════════════════╝";\
 		sleep 5;\
     fi
-	mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
+	@mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
 	[ -f $(VLM_LOGS_FILE) ] || touch $(VLM_LOGS_FILE); \
+	RUN_TAG=$$(python3 src/validate-configs.py --get-run-tag --camera-config configs/$(CAMERA_STREAM) --pipeline-config configs/$(WORKLOAD_DIST) 2>/dev/null || echo "default__unknown"); \
+	RUN_TIMESTAMP=$$(date +%Y-%m-%dT%H-%M-%S); \
+	RUN_DIR="$(RESULTS_DIR)/$${RUN_TAG}__$${RUN_TIMESTAMP}"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "Running benchmark in: $$RUN_DIR"; \
 	cd performance-tools/benchmark-scripts && \
 	export MULTI_STREAM_MODE=1 && \
 	export STREAM_LOOP=$(STREAM_LOOP_VALUE) && \
@@ -329,20 +357,27 @@ benchmark-stream-density: build-benchmark download-sample-videos download-models
 		$(TARGET_FPS_ARG) \
 		--container_names $(CONTAINER_NAMES) \
 		--density_increment $(DENSITY_INCREMENT) \
-		--results_dir $(RESULTS_DIR) \
+		--results_dir "$$RUN_DIR" \
 		$$(if [ "$(REGISTRY)" = "true" ]; then echo "--benchmark_type=reg"; fi); \
 	deactivate \
 	)
 	
 benchmark-quickstart: download-models download-sample-videos
+	@$(PRINT_CAMERA_ABOUT); \
+	print_camera_about "configs/$(CAMERA_STREAM)"
 	@if [ "$(REGISTRY)" = "true" ]; then \
 		echo "Using registry mode - skipping benchmark container build..."; \
 	else \
 		echo "Building benchmark container locally..."; \
 		$(MAKE) build-benchmark; \
 	fi
-	mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
+	@mkdir -p $$(dirname $(VLM_LOGS_FILE)); \
 	[ -f $(VLM_LOGS_FILE) ] || touch $(VLM_LOGS_FILE); \
+	RUN_TAG=$$(python3 src/validate-configs.py --get-run-tag --camera-config configs/$(CAMERA_STREAM) --pipeline-config configs/$(WORKLOAD_DIST) 2>/dev/null || echo "default__unknown"); \
+	RUN_TIMESTAMP=$$(date +%Y-%m-%dT%H-%M-%S); \
+	RUN_DIR="$(RESULTS_DIR)/$${RUN_TAG}__$${RUN_TIMESTAMP}"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "Running benchmark in: $$RUN_DIR"; \
 	cd performance-tools/benchmark-scripts && \
 	export MULTI_STREAM_MODE=1 && \
 	export STREAM_LOOP=$(STREAM_LOOP_VALUE) && \
@@ -350,10 +385,9 @@ benchmark-quickstart: download-models download-sample-videos
 	python3 -m venv venv && \
 	. venv/bin/activate && \
 	pip3 install -r requirements.txt && \
-	python3 benchmark.py --compose_file ../../src/$(DOCKER_COMPOSE) --pipelines $(PIPELINE_COUNT) --results_dir $(RESULTS_DIR) $$(if [ "$(REGISTRY)" = "true" ]; then echo "--benchmark_type=reg"; fi); \
-	deactivate \
-	)
-	$(MAKE) consolidate-metrics
+	python3 benchmark.py --compose_file ../../src/$(DOCKER_COMPOSE) --pipelines $(PIPELINE_COUNT) --results_dir "$$RUN_DIR" $$(if [ "$(REGISTRY)" = "true" ]; then echo "--benchmark_type=reg"; fi) \
+	) && \
+	$(MAKE) -C "$(CURDIR)" consolidate-metrics TARGET_DIR="$$RUN_DIR"
 
 clean-images:
 	@echo "Cleaning up dangling Docker images..."
@@ -426,22 +460,29 @@ validate-all-configs:
 	@python3 src/validate-configs.py --validate-all
 
 consolidate-metrics:
+	@TARGET_DIR="$(TARGET_DIR)"; \
+	if [ -z "$$TARGET_DIR" ]; then TARGET_DIR=$$(ls -td $(RESULTS_DIR)/*/ 2>/dev/null | head -1 | sed 's|/$$||'); fi; \
+	TARGET_DIR=$${TARGET_DIR:-$(RESULTS_DIR)}; \
+	echo "Consolidating metrics for: $$TARGET_DIR"; \
 	cd performance-tools/benchmark-scripts && \
 	( \
 	python3 -m venv venv && \
 	. venv/bin/activate && \
 	pip install -r requirements.txt && \
-	python3 consolidate_multiple_run_of_metrics.py --root_directory $(RESULTS_DIR) --output $(RESULTS_DIR)/metrics.csv && \
+	python3 consolidate_multiple_run_of_metrics.py --root_directory "$$TARGET_DIR" --output "$$TARGET_DIR/metrics.csv" && \
 	deactivate \
 	)
 
 plot-metrics:
+	@TARGET_DIR=$$(ls -td $(RESULTS_DIR)/*/ 2>/dev/null | head -1 | sed 's|/$$||'); \
+	TARGET_DIR=$${TARGET_DIR:-$(RESULTS_DIR)}; \
+	echo "Plotting metrics from: $$TARGET_DIR"; \
 	cd performance-tools/benchmark-scripts && \
 	( \
 	python3 -m venv venv && \
 	. venv/bin/activate && \
 	pip install -r requirements.txt && \
-	python3 usage_graph_plot.py --dir $(RESULTS_DIR)  && \
+	python3 usage_graph_plot.py --dir "$$TARGET_DIR" && \
 	deactivate \
 	)
 
